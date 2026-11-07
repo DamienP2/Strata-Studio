@@ -1,8 +1,8 @@
-# Strata Studio : proposition (v4)
+# Strata Studio : proposition (v5)
 
 > Statut : **proposition**. Le Réalisateur (règles, décisions, reprise en main) et le studio simulé existent ; les pilotes réels sont à écrire, sauf la console Midas M32.
 
-**Strata Studio** rend un studio de podcast ou de radio filmée **autonome**. Un journaliste prépare et lance son émission depuis une **tablette en Wi-Fi**. Une **IA locale** commute le mélangeur et cadre les caméras PTZ. Il n'y a pas de réalisateur, mais un réalisateur peut **reprendre la main** à tout moment.
+**Strata Studio** rend un studio de podcast ou de radio filmée **autonome**. Son cœur est une **IA locale de réalisation et de mixage** : elle commute le mélangeur, cadre les caméras PTZ et, si besoin, tient le mélange des micros. Un journaliste suit et contrôle son émission depuis une **tablette en Wi-Fi**, étape par étape. Il n'y a pas de réalisateur ; quelqu'un peut **reprendre la main directement sur le mélangeur ou sur la console**.
 
 Studio est un **système de contrôle**. Il pilote le nodal, le mélangeur, les caméras, la console audio et, par Bitfocus, la lumière et le reste. **Aucune image ne passe par lui** : s'il s'arrête, le studio reste dans son dernier état et l'antenne continue.
 
@@ -12,7 +12,9 @@ Studio est un **système de contrôle**. Il pilote le nodal, le mélangeur, les 
 
 | Sujet | Décision |
 | --- | --- |
-| Réalisation | **automatique** par une IA interne et locale ; reprise en main possible par un réalisateur |
+| Réalisation | **automatique** par une IA interne et locale : c'est la priorité du projet |
+| Mixage audio | **par l'IA si besoin**, au travers de la console (§ 5.6) |
+| Reprise en main | **directement sur le mélangeur et/ou sur la console audio** ; pas d'écran de régie |
 | Mélangeur | **tous les ATEM** et **vMix (version actuelle)**, pilotés (pas de mélangeur interne) |
 | Formats | **SDI, NDI et ST 2110** |
 | Nodal | **Videohub** en SDI ; en ST 2110, **pas de registre NMOS** ; en NDI, **pas de routeur** : Studio route lui-même |
@@ -24,7 +26,8 @@ Studio est un **système de contrôle**. Il pilote le nodal, le mélangeur, les 
 | Automations | **Bitfocus Buttons seulement**, qui gère tout le reste ; dans les deux sens |
 | Image pour l'IA | la **sortie NDI** des FR7 et AM7 |
 | Destinations (direct, fichiers) | **à définir** |
-| Tablette | **aucune identification** : c'est une interface |
+| Tablette | **contrôle et surveillance** (enregistrement, direct, son, image, lumière), **étape par étape avec vérification** ; aucune identification |
+| Administration | **un canvas de nœuds** relié à Buttons, qui fait les contrôles |
 | OnAir Studio | **non** |
 | Code | **dépôt à part** (celui-ci), sur le modèle de Strata Multiview |
 
@@ -34,8 +37,8 @@ Studio est un **système de contrôle**. Il pilote le nodal, le mélangeur, les 
 
 ```
                           ┌──────────────── Strata Studio (serveur, GPU) ────────────────┐
-  Tablette Wi-Fi ───WS───►│  Scénarios d'émission · IA de commutation · Reprise en main  │◄── Réalisateur
-  (journaliste)           │  Pilotes : mélangeur · nodal · PTZ · console audio           │    (régie ou distant)
+  Tablette Wi-Fi ───WS───►│  Scénarios (canvas de nœuds) · IA de réalisation et de mixage│
+  (journaliste)           │  Pilotes : mélangeur · nodal · PTZ · console audio           │
                           └───┬─────────┬──────────┬───────────┬─────────────┬───────────┘
               contrôle seul   │         │          │           │             │  HTTP · OSC · TCP
                      ┌────────▼──┐ ┌────▼────┐ ┌───▼─────┐ ┌───▼────────┐ ┌──▼──────────────────────┐
@@ -46,6 +49,7 @@ Studio est un **système de contrôle**. Il pilote le nodal, le mélangeur, les 
   signal :  caméras ──► nodal ──► mélangeur ──► nodal ──► diffusion, encodeurs, enregistreurs
             micros Dante ──► console ──► programme
   analyse : copie AES67 des micros ──► Studio      flux réduit de chaque caméra ──► Studio
+  reprise : une main sur le mélangeur ou sur la console suffit
 ```
 
 ---
@@ -102,18 +106,39 @@ Bitfocus Buttons pilote déjà la lumière en DMX et les automations du studio. 
 | Sens | Comment | Exemples |
 | --- | --- | --- |
 | **Studio → Bitfocus** | appui sur un bouton (page, ligne, colonne) ; écriture de variables | scène lumière « préparation », « antenne », « fin » ; voyant ON AIR ; toute automation déjà faite dans Buttons |
-| **Bitfocus → Studio** | API REST courte, OSC, TCP texte (comme Strata Graphics : `/api/v1/…`, UDP 9000, TCP 9001) | lancer une étape du scénario, prendre ou rendre la main, imposer un plan, verrouiller une caméra |
+| **Bitfocus → Studio** | API REST courte, OSC, TCP texte (comme Strata Graphics : `/api/v1/…`, UDP 9000, TCP 9001) | lancer une étape du scénario, rendre la main à l'IA, verrouiller une caméra |
 | **Retours vers Bitfocus** | variables tenues à jour par Studio | `studio_mode` (IA ou MANUEL), `studio_speaker` (qui parle), `studio_on_air`, `studio_recording`, plan à l'antenne |
 
 Un Stream Deck en régie ou sur le plateau devient ainsi une **surface de Studio** sans rien développer de plus. Un module dédié pour Bitfocus pourra venir ensuite (actions, retours, variables prêtes à l'emploi).
 
-Une **étape de scénario** peut contenir des actions Studio (routes, presets, console, mélangeur) et des actions Bitfocus (lumière, ON AIR). L'admin règle le tout au même endroit.
+### 3.1 L'administration : un canvas de nœuds
+
+L'administration tient sur **un seul écran : un canvas de nœuds**, comme un graphe. On y décrit ce qui se passe à chaque étape de l'émission, en reliant des nœuds par des fils :
+
+| Nœud | Exemples |
+| --- | --- |
+| **Déclencheur** | une étape de la tablette (préparer, vérifier, antenne, pause, terminer) ; un bouton de la tablette (toux, lumière) ; une heure ; une alerte (micro faible, direct coupé) ; un événement de l'IA (changement de locuteur) |
+| **Condition** | direct ou enregistré ; place occupée ; profil de l'émission |
+| **Action Buttons** | les boutons et les actions de Buttons, lus par la connexion à Buttons : scène lumière, ON AIR, routes, enregistreurs, tout ce que Buttons sait faire |
+| **Action Studio** | ce que l'IA a besoin de faire vite et avec un retour : profil de réalisation, mixage, presets PTZ |
+| **Surveillance** | ce que la tablette affiche et vérifie : un état lu dans Buttons ou sur un appareil (le stream tourne, l'enregistreur enregistre, le son arrive) |
+
+Exemple : *Antenne* → *Buttons : lumière antenne* → *Buttons : ON AIR* → *Studio : ouvrir les micros des places occupées* → *Studio : IA en marche, profil Débat*.
+
+Le canvas **remplace** les pages Plateau et Scénario de la version 1 : Studio y lit les appareils et les actions que Buttons connaît déjà, l'admin n'a qu'à les relier.
 
 ---
 
 ## 4. La tablette des journalistes
 
-C'est l'outil principal : une application web installable, servie par Studio en Wi-Fi, pour quelqu'un qui n'est **pas technicien**. **Pas d'identification** : on l'ouvre, on s'en sert.
+Une application web installable, servie par Studio en Wi-Fi, pour quelqu'un qui n'est **pas technicien**. **Pas d'identification** : on l'ouvre, on s'en sert.
+
+Elle ne sert qu'à deux choses :
+
+- **contrôler** : avancer d'étape, la lumière, la toux, la pause, terminer ;
+- **surveiller**, en mots simples : l'enregistrement tourne, le direct est en ligne, chaque voix est bien entendue, les caméras suivent, la lumière est sur la bonne scène. Un problème s'affiche avec ce qu'il faut faire.
+
+Elle ne montre ni adresse, ni numéro d'entrée, ni réglage technique.
 
 ### 4.1 Le déroulé
 
@@ -171,21 +196,38 @@ L'IA **répartit les PTZ en continu**. Une caméra est à l'antenne ; les autres
 
 Le Réalisateur est une **fonction pure** : une émission enregistrée se **rejoue** et donne les mêmes décisions. Chaque décision porte sa **raison** (« Alice parle », « plan tenu longtemps : plan de coupe », « Karim pourrait parler »).
 
+### 5.6 Le mixage audio par l'IA
+
+L'IA tient aussi le son quand personne n'est à la console. Elle **ne fait pas passer l'audio par Studio** : elle pilote la console, qui garde le chemin du signal.
+
+Deux vitesses :
+
+1. **Rapide (quelques millisecondes)** : le partage de gain entre les micros ouverts (automix), qui baisse les micros de ceux qui ne parlent pas. Il doit tourner **dans la console**, pas sur le réseau : piloter des faders en direct par OSC ou RCP ajouterait du retard et des à-coups. Studio active et règle l'automix de la console quand elle en a un (à vérifier selon le modèle et le firmware de la M32 et de la DM5) ; à défaut, il se limite à la vitesse lente.
+2. **Lente (de la seconde à la minute)** : ce que l'IA décide elle-même :
+   - ouvrir les micros des places occupées, fermer les autres ;
+   - **niveau de chaque voix** : rapprocher les voix trop faibles ou trop fortes, en douceur ;
+   - **niveau du programme** : viser une loudness cible (EBU R128, déjà mesurée par Strata Multiview) ;
+   - **jingles et virgules** : baisser les voix le temps qu'ils passent ;
+   - **alertes** : micro qui tombe, souffle, larsen, voix trop proche ; l'alerte part vers la tablette avec la consigne (« rapprochez le micro de Karim »).
+
+Elle s'appuie sur la même perception que la réalisation (qui parle, à quel niveau) : son et image restent cohérents.
+
 ---
 
-## 6. La reprise en main
+## 6. La reprise en main : sur le mélangeur et sur la console
 
-| Comment | Effet |
-| --- | --- |
-| **Toucher le pupitre ATEM ou vMix** | Studio voit une coupe qu'il n'a pas commandée : l'IA **se suspend aussitôt** |
-| **« Prendre la main »** sur la page Régie, sur place ou à distance, ou par un bouton Bitfocus | idem, avec le nom de celui qui a la main |
-| **Reprise partielle** | verrouiller une caméra, interdire un plan, imposer un plan pendant N secondes |
+Il n'y a **pas d'écran de régie**. On reprend la main là où on a l'habitude de travailler :
 
-**« Rendre la main à l'IA »** est un geste explicite. L'IA repart du plan à l'antenne sans couper aussitôt.
+| Où | Ce que Studio voit | Effet |
+| --- | --- | --- |
+| **Mélangeur** (pupitre ATEM, interface vMix) | une coupe ou une transition qu'il n'a pas commandée | l'IA **cesse de commuter et de bouger les caméras** |
+| **Console** (M32, DM5) | un fader, une coupure ou un réglage qu'il n'a pas commandé | l'IA **cesse de mixer** ; le reste du son est laissé tel quel |
 
-L'état est visible partout : tablette, page Régie, UMD du multiview, variables Bitfocus.
+Les deux sont **indépendants** : on peut reprendre l'image et laisser le son à l'IA, ou l'inverse.
 
-**Priorités** : Réalisateur > Journaliste (tablette) > IA.
+**Rendre la main à l'IA** : par défaut, après un temps sans geste humain (réglable, par exemple 30 s), ou tout de suite par un bouton de Buttons. L'IA repart du plan et des niveaux en place, sans à-coup.
+
+L'état est visible sur la tablette (« Image : à la main », « Son : automatique ») et dans les variables de Buttons.
 
 **Mode ombre** : l'IA décide sans rien envoyer. On compare ses choix à ceux d'un réalisateur humain avant de lui confier l'antenne. Chaque reprise en main est gardée, en local, pour entraîner le classement des plans.
 
@@ -202,7 +244,7 @@ crates/
                           → scénarios, état voulu / réel, tablette, régie, comptes, journal
   strata-studio-sense     → AES67, VAD, dominance, vision, transcription
   strata-studio-tray      → appli de la zone de notification / barre des menus
-web/                      → régie et administration ; tablette
+web/                      → tablette ; canvas d'administration (nœuds) relié à Buttons
 ```
 
 ### Repris des autres applications Strata
@@ -230,12 +272,13 @@ Une machine Linux avec une carte NVIDIA, sur le réseau de contrôle, le réseau
 - Presets VISCA sur FR7 et AM7.
 - Micros Dante en AES67, VAD et micro dominant.
 - Mode ombre sur de vraies émissions, avec la mesure de l'accord entre l'IA et le réalisateur.
+- Reprise en main vue sur le mélangeur et sur la console.
 
 **Étape 1 : le studio autonome**
-- Tablette : scénarios, préparation, vérification, antenne, fin, chrono.
-- Bitfocus dans les deux sens (lumière, ON AIR, variables, surfaces).
-- Nodal SDI, ST 2110 et NDI ; enregistreurs ; console Yamaha.
-- Page Régie et reprise en main.
+- Tablette de contrôle et de surveillance, étape par étape avec vérification.
+- Canvas d'administration (nœuds) relié à Buttons.
+- Mixage par l'IA (vitesse lente) ; console Yamaha.
+- Nodal SDI, ST 2110 et NDI.
 
 **Étape 2 : l'IA qui voit et qui anticipe**
 - Visages, lèvres, locuteur actif audio-vidéo ; prédiction de la prise de parole.
@@ -259,12 +302,16 @@ Une machine Linux avec une carte NVIDIA, sur le réseau de contrôle, le réseau
 | Tablette sans identification | réseau dédié qui ne voit que Studio ; actions sensibles en appui long |
 | Un appareil change d'état à l'insu de Studio | état voulu / réel, alertes |
 | Confiance des équipes | mode ombre, raisons affichées, reprise par le simple pupitre |
+| Mixage qui « pompe » ou qui tarde | l'automix rapide reste dans la console ; l'IA ne fait que les réglages lents |
 
 ---
 
 ## 10. Maquettes
 
-Les écrans de la tablette (accueil, préparation, vérification, antenne, fin), la page Régie avec la reprise en main, la page Plateau et l'éditeur de scénario : https://claude.ai/artifact/U6a7FSWuRyNGfwNzkCqmrG
+https://claude.ai/artifact/U6a7FSWuRyNGfwNzkCqmrG
+
+- Page **Tablette · 5 pistes** : cinq directions de design pour la tablette, pendant l'émission (clair et calme, trois anneaux, tuiles, une chose à la fois, autour de la table).
+- Page **Version 1** : le premier parcours complet de la tablette, et les pages Régie, Plateau et Scénario, remplacées depuis par la reprise sur le pupitre et le canvas de nœuds.
 
 ---
 
@@ -272,3 +319,5 @@ Les écrans de la tablette (accueil, préparation, vérification, antenne, fin),
 
 1. **Destinations** : où vont le direct (encodeurs, plateformes) et les fichiers (disques de l'ATEM, HyperDeck, NAS, MAM) ? À définir.
 2. **ST 2110** : quels appareils Studio doit-il connecter par IS-05 (passerelles, encodeurs, multiviewer) ?
+3. **Rendre la main à l'IA** : après un délai sans geste humain (proposé), par un bouton de Buttons, ou les deux ?
+4. **Automix** : les M32 et DM5 du studio ont-elles leur automix activable ?
