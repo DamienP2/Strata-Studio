@@ -1,0 +1,173 @@
+//! Simulated devices: they obey at once (a PTZ takes its travel time) and
+//! remember what they were told.
+
+use crate::{AudioConsole, Automation, Ptz, PtzStatus, Result, Router, Switcher};
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+#[derive(Debug, Default)]
+pub struct SimSwitcher {
+    program: Option<u16>,
+}
+
+impl SimSwitcher {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A person cuts on the panel.
+    pub fn panel_cut(&mut self, input: u16) {
+        self.program = Some(input);
+    }
+}
+
+impl Switcher for SimSwitcher {
+    fn name(&self) -> String {
+        "mélangeur simulé".into()
+    }
+    fn connected(&self) -> bool {
+        true
+    }
+    fn cut(&mut self, input: u16) -> Result<()> {
+        self.program = Some(input);
+        Ok(())
+    }
+    fn program(&self) -> Option<u16> {
+        self.program
+    }
+}
+
+#[derive(Debug)]
+pub struct SimPtz {
+    name: String,
+    preset: Option<u8>,
+    travel: Duration,
+    moving: Option<(Instant, u8)>,
+}
+
+impl SimPtz {
+    pub fn new(name: impl Into<String>, preset: u8, travel: Duration) -> Self {
+        SimPtz {
+            name: name.into(),
+            preset: Some(preset),
+            travel,
+            moving: None,
+        }
+    }
+}
+
+impl Ptz for SimPtz {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    fn recall(&mut self, preset: u8) -> Result<()> {
+        self.moving = Some((Instant::now() + self.travel, preset));
+        Ok(())
+    }
+    fn status(&mut self) -> PtzStatus {
+        if let Some((until, preset)) = self.moving {
+            if Instant::now() >= until {
+                self.preset = Some(preset);
+                self.moving = None;
+            }
+        }
+        PtzStatus {
+            online: true,
+            moving: self.moving.is_some(),
+            preset: if self.moving.is_some() {
+                None
+            } else {
+                self.preset
+            },
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SimConsole {
+    /// channel → (on, name)
+    pub channels: BTreeMap<u8, (bool, String)>,
+}
+
+impl AudioConsole for SimConsole {
+    fn name(&self) -> String {
+        "console simulée".into()
+    }
+    fn set_on(&mut self, channel: u8, on: bool) -> Result<()> {
+        self.channels.entry(channel).or_default().0 = on;
+        Ok(())
+    }
+    fn set_name(&mut self, channel: u8, name: &str) -> Result<()> {
+        self.channels.entry(channel).or_default().1 = name.into();
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SimRouter {
+    routes: BTreeMap<String, String>,
+}
+
+impl Router for SimRouter {
+    fn name(&self) -> String {
+        "nodal simulé".into()
+    }
+    fn route(&mut self, destination: &str, source: &str) -> Result<()> {
+        self.routes.insert(destination.into(), source.into());
+        Ok(())
+    }
+    fn routes(&self) -> Vec<(String, String)> {
+        self.routes
+            .iter()
+            .map(|(d, s)| (d.clone(), s.clone()))
+            .collect()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SimAutomation {
+    pub pressed: Vec<(u16, u8, u8)>,
+    pub variables: BTreeMap<String, String>,
+}
+
+impl Automation for SimAutomation {
+    fn name(&self) -> String {
+        "Bitfocus simulé".into()
+    }
+    fn press(&mut self, page: u16, row: u8, column: u8) -> Result<()> {
+        self.pressed.push((page, row, column));
+        Ok(())
+    }
+    fn set_variable(&mut self, name: &str, value: &str) -> Result<()> {
+        self.variables.insert(name.into(), value.into());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_ptz_is_moving_then_framed() {
+        let mut ptz = SimPtz::new("Cam 2", 1, Duration::from_millis(30));
+        ptz.recall(4).unwrap();
+        assert_eq!(
+            ptz.status(),
+            PtzStatus {
+                online: true,
+                moving: true,
+                preset: None
+            }
+        );
+        std::thread::sleep(Duration::from_millis(40));
+        assert_eq!(
+            ptz.status(),
+            PtzStatus {
+                online: true,
+                moving: false,
+                preset: Some(4)
+            }
+        );
+    }
+}
