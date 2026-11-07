@@ -1,4 +1,4 @@
-# Strata Studio : proposition (v3)
+# Strata Studio : proposition (v4)
 
 > Statut : **proposition**. Le Réalisateur (règles, décisions, reprise en main) et le studio simulé existent ; les pilotes réels sont à écrire, sauf la console Midas M32.
 
@@ -13,14 +13,17 @@ Studio est un **système de contrôle**. Il pilote le nodal, le mélangeur, les 
 | Sujet | Décision |
 | --- | --- |
 | Réalisation | **automatique** par une IA interne et locale ; reprise en main possible par un réalisateur |
-| Mélangeur | **ATEM et vMix**, pilotés (pas de mélangeur interne) |
+| Mélangeur | **tous les ATEM** et **vMix (version actuelle)**, pilotés (pas de mélangeur interne) |
 | Formats | **SDI, NDI et ST 2110** |
+| Nodal | **Videohub** en SDI ; en ST 2110, **pas de registre NMOS** ; en NDI, **pas de routeur** : Studio route lui-même |
 | Direct et enregistré | les deux, **au travers d'un nodal piloté par Studio** |
 | Caméras | 4 PTZ **Sony FR7 ou BRC-AM7** |
 | Intervenants | jusqu'à **5** |
-| Micros | **Dante**, au travers d'une console **Midas M32** ou **Yamaha DM5**, pilotée par Studio |
+| Micros | **Dante**, au travers d'une console **Midas M32** ou **Yamaha DM5** (même protocole que les DM3 et DM7), pilotée par Studio |
 | Lumière | **DMX via Bitfocus Buttons** |
-| Automations | possibles aussi **par Bitfocus**, dans les deux sens |
+| Automations | **Bitfocus Buttons seulement**, qui gère tout le reste ; dans les deux sens |
+| Image pour l'IA | la **sortie NDI** des FR7 et AM7 |
+| Destinations (direct, fichiers) | **à définir** |
 | Tablette | **aucune identification** : c'est une interface |
 | OnAir Studio | **non** |
 | Code | **dépôt à part** (celui-ci), sur le modèle de Strata Multiview |
@@ -55,21 +58,21 @@ Studio pilote **directement** ce dont l'IA a besoin vite et avec un retour d'ét
 | --- | --- | --- | --- |
 | **ATEM** | UDP 9910 | programme et preview, cut et mix, macros, SuperSource, keyers, aux, enregistrement et stream (modèles ISO) ; lit le tally et **voit une action humaine sur le pupitre** | client ATEM de Strata Multiview (`tally/atem.rs`, en lecture : à étendre aux commandes) |
 | **vMix** | API TCP 8099 | cut, fondu, inputs, overlays, enregistrement, stream ; état et tally | à écrire |
-| **Nodal SDI** | Videohub (TCP 9990), SW-P-08 (Probel, la plupart des grilles) | routes par émission (salves) : PGM vers la diffusion et les enregistreurs, retours | à écrire |
-| **Nodal ST 2110** | NMOS IS-04 (registre), IS-05 (connexions) ; état PTP | mêmes routes en IP ; vérification de la synchro avant antenne | IS-05 dans Strata Multiview, état PTP dans Strata Graphics (`sync.rs`) |
-| **NDI** | routage NDI du SDK (sources virtuelles redirigées) | mêmes routes en NDI ; aucune image ne passe par Studio | runtime NDI déjà chargé par Strata Graphics |
+| **Nodal SDI** | Videohub (TCP 9990, protocole texte) | routes par émission (salves) : PGM vers la diffusion et les enregistreurs, retours ; noms des entrées et sorties ; verrouillage des sorties sensibles | à écrire |
+| **Nodal ST 2110** | NMOS IS-05, **en direct vers chaque appareil** (pas de registre : leurs adresses sont déclarées sur la page Plateau, ou trouvées en mDNS) ; état PTP | mêmes routes en IP ; vérification de la synchro avant antenne | IS-05 dans Strata Multiview, état PTP dans Strata Graphics (`sync.rs`) |
+| **NDI** | routage NDI du SDK : **Studio fait office de routeur** (sources virtuelles qu'il redirige) | mêmes routes en NDI ; aucune image ne passe par Studio | runtime NDI déjà chargé par Strata Graphics |
 | **Sony FR7 / BRC-AM7** | VISCA over IP, CGI HTTP ; OpenTrackIO (FR7) | presets, pan, tilt, zoom, vitesses, mise au point ; position réelle de la tête ; suivi automatique intégré si le modèle et le firmware l'ont (à vérifier) | OpenTrackIO dans Strata Graphics (`tracking.rs`) |
 | **Midas M32** | OSC, UDP 10023 | scène de l'émission, **noms des invités sur les tranches**, ouverture et coupure des micros, faders ; retour des changements faits sur la console (`/xremote`) | **écrit** : `strata-studio-devices/src/m32.rs` (coupure, nom) |
-| **Yamaha DM5** | RCP, TCP 49280 (comme les DM3 et DM7 ; à confirmer sur le DM5) | idem | à écrire |
+| **Yamaha DM5** | RCP, TCP 49280 (le même protocole que les DM3 et DM7) | idem | à écrire |
 | **Micros Dante** | AES67 (SAP, RTP L24 48 kHz) ou carte son Dante | copie de chaque micro pour l'IA ; présence du signal pour la vérification | `dante.rs` de Strata Multiview |
 | **Habillage** | API de Strata Graphics | noms des invités, synthé de celui qui parle | API existante |
 | **Multiview** | TSL 5.0 | UMD : « IA · Cam 2 · Alice », « MANUEL · Paul » | Strata Multiview lit le TSL |
 
 ### 2.1 Les trois formats
 
-Le **pilote de nodal** est choisi par format : SDI (Videohub, SW-P-08), ST 2110 (NMOS IS-05) ou NDI (routage NDI). Un même studio peut mélanger les trois. Les scénarios parlent de **destinations et de sources nommées** (« PGM → Diffusion 1 »), jamais de numéros de grille.
+Le **pilote de nodal** est choisi par format : SDI (Videohub), ST 2110 (NMOS IS-05 sans registre) ou NDI (routage fait par Studio). Un même studio peut mélanger les trois. Les scénarios parlent de **destinations et de sources nommées** (« PGM → Diffusion 1 »), jamais de numéros de grille.
 
-Pour l'**analyse**, l'IA n'a besoin que d'une image réduite de chaque caméra. Le plus simple est le flux IP de la caméra elle-même (RTSP, SRT ou NDI|HX selon le modèle et ses licences), quel que soit le format du studio. À défaut : une capture NDI, ou SDI par une carte DeckLink.
+Pour l'**analyse**, l'IA lit la **sortie NDI** de chaque FR7 et AM7, décodée en basse définition, quel que soit le format du studio.
 
 ### 2.2 La console audio
 
@@ -259,11 +262,13 @@ Une machine Linux avec une carte NVIDIA, sur le réseau de contrôle, le réseau
 
 ---
 
-## 10. Questions ouvertes
+## 10. Maquettes
 
-1. **Mélangeurs** : quels modèles d'ATEM (ISO ? SuperSource ?) et quelle version de vMix ?
-2. **Nodal** : quelle grille SDI (marque, protocole) ? Un registre NMOS en 2110 ? Un routeur NDI existe-t-il déjà ?
-3. **Yamaha DM5** : est-ce bien ce modèle ? Je connais le DM3 et le DM7, qui parlent le même protocole.
-4. **Bitfocus** : Buttons seulement, ou aussi Companion ? Quelle version ?
-5. **Destinations** : où vont le direct (encodeurs, plateformes) et les enregistrements (ATEM ISO, HyperDeck, vMix, NAS) ?
-6. **Flux d'analyse** : les FR7 et AM7 ont-elles leur sortie IP (NDI|HX, SRT, RTSP) disponible sur le réseau ?
+Les écrans de la tablette (accueil, préparation, vérification, antenne, fin), la page Régie avec la reprise en main, la page Plateau et l'éditeur de scénario : https://claude.ai/artifact/U6a7FSWuRyNGfwNzkCqmrG
+
+---
+
+## 11. Questions ouvertes
+
+1. **Destinations** : où vont le direct (encodeurs, plateformes) et les fichiers (disques de l'ATEM, HyperDeck, NAS, MAM) ? À définir.
+2. **ST 2110** : quels appareils Studio doit-il connecter par IS-05 (passerelles, encodeurs, multiviewer) ?

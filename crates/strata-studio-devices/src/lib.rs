@@ -3,11 +3,11 @@
 //!
 //! | Interface | Devices (planned) |
 //! | --- | --- |
-//! | [`Switcher`] | Blackmagic ATEM (UDP 9910), vMix (TCP 8099) |
-//! | [`Router`] | Videohub (TCP 9990), SW-P-08, NMOS IS-05 (ST 2110), NDI routing |
+//! | [`Switcher`] | Blackmagic ATEM, all models (UDP 9910), vMix (TCP 8099) |
+//! | [`Router`] | Videohub (TCP 9990), NMOS IS-05 without a registry (ST 2110), NDI routing done by Studio |
 //! | [`Ptz`] | Sony FR7, BRC-AM7 (VISCA over IP, CGI) |
-//! | [`AudioConsole`] | Midas M32 (OSC, [`m32`]), Yamaha (RCP) |
-//! | [`Automation`] | Bitfocus Companion / Buttons: lights (DMX), ON AIR, the rest |
+//! | [`AudioConsole`] | Midas M32 (OSC, [`m32`]), Yamaha DM5 (RCP) |
+//! | [`Automation`] | Bitfocus Buttons: lights (DMX), ON AIR, the rest |
 
 pub mod m32;
 pub mod sim;
@@ -37,7 +37,8 @@ pub trait Switcher: Send {
     fn program(&self) -> Option<u16>;
 }
 
-/// A video router: the plant's « nodal », SDI, ST 2110 or NDI.
+/// A video router: the plant's « nodal » (Videohub in SDI, IS-05 in ST 2110,
+/// Studio's own NDI routing).
 pub trait Router: Send {
     fn name(&self) -> String;
     fn route(&mut self, destination: &str, source: &str) -> Result<()>;
@@ -69,7 +70,7 @@ pub trait AudioConsole: Send {
     fn set_name(&mut self, channel: u8, name: &str) -> Result<()>;
 }
 
-/// Bitfocus Companion / Buttons: what Studio does not drive itself (the
+/// Bitfocus Buttons: what Studio does not drive itself (the
 /// lights through DMX, the ON AIR light, other automations).
 pub trait Automation: Send {
     fn name(&self) -> String;

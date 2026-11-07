@@ -2,11 +2,11 @@
 
 **Le studio autonome.** Strata Studio automatise un studio de podcast ou de radio filmée. Un journaliste prépare et lance son émission depuis une tablette. Une IA locale commute le mélangeur (ATEM ou vMix) et cadre les caméras PTZ (Sony FR7, BRC-AM7). Un réalisateur peut reprendre la main à tout moment.
 
-Studio est un système de contrôle. Il pilote le nodal (SDI, NDI, ST 2110), le mélangeur, les caméras et la console audio (Midas M32, Yamaha). Il passe par Bitfocus Buttons pour la lumière et les automations. Aucune image ne passe par lui.
+Studio est un système de contrôle. Il pilote le nodal (Videohub en SDI, NMOS IS-05 en ST 2110, routage NDI), le mélangeur, les caméras et la console audio (Midas M32, Yamaha DM5). Il passe par Bitfocus Buttons pour la lumière et les automations. Aucune image ne passe par lui.
 
 Strata Studio fait partie de la galaxie Strata, avec Strata Graphics et Strata Multiview.
 
-> État : **étape 0**. Le Réalisateur et un studio simulé fonctionnent ; les pilotes des appareils réels sont à écrire, sauf la console M32. La proposition complète est dans [`docs/PROPOSITION.md`](docs/PROPOSITION.md).
+> État : **étape 0**. Le Réalisateur et un studio simulé fonctionnent ; les pilotes des appareils réels sont à écrire, sauf la console M32. La proposition complète est dans [`docs/PROPOSITION.md`](docs/PROPOSITION.md), les maquettes sur https://claude.ai/artifact/U6a7FSWuRyNGfwNzkCqmrG.
 
 ## Essayer
 
