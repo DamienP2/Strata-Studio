@@ -197,7 +197,7 @@ L'état est visible partout : tablette, page Régie, UMD du multiview, variables
 crates/
   strata-studio-core      ✔ modèle (places, caméras, plans), perception, profils, Réalisateur (pur, testé)
   strata-studio-devices   ✔ interfaces (Switcher, Router, Ptz, AudioConsole, Automation), simulateurs, M32
-                          → ATEM, vMix, Videohub, SW-P-08, NMOS IS-05, NDI, VISCA, CGI Sony, Yamaha RCP, Bitfocus
+                          → ATEM, vMix, Videohub, NMOS IS-05, routage NDI, VISCA, CGI Sony, Yamaha RCP, Bitfocus
   strata-studio-server    ✔ exécutable strata-studio : studio simulé, API d'état et de reprise en main
                           → scénarios, état voulu / réel, tablette, régie, comptes, journal
   strata-studio-sense     → AES67, VAD, dominance, vision, transcription
