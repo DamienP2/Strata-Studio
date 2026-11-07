@@ -94,7 +94,7 @@ Le retour de la console sert aussi : un micro coupé à la main, un fader descen
 Studio garde l'**état voulu** de chaque appareil (routes, scène, presets, micros ouverts, enregistrement) et le compare en continu à l'**état réel**.
 
 - Un appareil qui redémarre ou se reconnecte retrouve l'état voulu.
-- Une différence inattendue (route changée à la main, enregistreur arrêté) lève une alerte sur la tablette et dans la régie.
+- Une différence inattendue (route changée à la main, enregistreur arrêté) lève une alerte sur la tablette.
 - Toutes les commandes sont **idempotentes** : une commande répétée parce que le Wi-Fi a hésité ne fait rien de plus.
 
 ---
@@ -163,7 +163,7 @@ Le **chrono d'antenne** est dans Studio et s'affiche sur la tablette.
 
 ### 4.3 Sans identification, protégée par le réseau
 
-Le Wi-Fi des tablettes est un réseau dédié qui **n'atteint que Studio**. Studio est le seul à parler aux appareils. Les pages d'administration et de régie restent protégées par compte, comme dans les autres applications Strata.
+Le Wi-Fi des tablettes est un réseau dédié qui **n'atteint que Studio**. Seuls Studio et Buttons parlent aux appareils. Le canvas d'administration reste protégé par compte, comme dans les autres applications Strata.
 
 ---
 
@@ -241,7 +241,7 @@ crates/
   strata-studio-devices   ✔ interfaces (Switcher, Router, Ptz, AudioConsole, Automation), simulateurs, M32
                           → ATEM, vMix, Videohub, NMOS IS-05, routage NDI, VISCA, CGI Sony, Yamaha RCP, Bitfocus
   strata-studio-server    ✔ exécutable strata-studio : studio simulé, API d'état et de reprise en main
-                          → scénarios, état voulu / réel, tablette, régie, comptes, journal
+                          → canvas de nœuds, état voulu / réel, tablette, comptes, journal
   strata-studio-sense     → AES67, VAD, dominance, vision, transcription
   strata-studio-tray      → appli de la zone de notification / barre des menus
 web/                      → tablette ; canvas d'administration (nœuds) relié à Buttons
