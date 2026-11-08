@@ -1,13 +1,19 @@
 //! Simulated devices: they obey at once (a PTZ takes its travel time) and
 //! remember what they were told.
 
-use crate::{AudioConsole, Automation, Ptz, PtzStatus, Result, Router, Switcher};
+use crate::{AudioConsole, Automation, Ptz, PtzStatus, Result, Router, Shown, Switcher};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
+
+/// The input number the simulated switcher gives its layouts.
+pub const SIM_LAYOUT: u16 = 6000;
 
 #[derive(Debug, Default)]
 pub struct SimSwitcher {
     program: Option<u16>,
+    /// What was last shown, and set up.
+    pub shown: Option<Shown>,
+    pub preloaded: Option<Shown>,
 }
 
 impl SimSwitcher {
@@ -34,6 +40,22 @@ impl Switcher for SimSwitcher {
     }
     fn program(&self) -> Option<u16> {
         self.program
+    }
+    fn show(&mut self, shown: Shown) -> Result<()> {
+        self.program = Some(match shown {
+            Shown::Input(i) => i,
+            _ => SIM_LAYOUT,
+        });
+        self.shown = Some(shown);
+        Ok(())
+    }
+    fn preload(&mut self, shown: Shown) -> Result<()> {
+        self.preloaded = Some(shown);
+        Ok(())
+    }
+    fn demo_panel_cut(&mut self, input: u16) -> bool {
+        self.program = Some(input);
+        true
     }
 }
 

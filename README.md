@@ -16,6 +16,18 @@ cargo run -p strata-studio-server
 
 Le serveur démarre un **studio simulé** : 5 places, 4 PTZ, un mélangeur, une console et une conversation de démonstration. Le Réalisateur le dirige en direct.
 
+Pour piloter un vrai mélangeur à la place du simulé :
+
+```bash
+cargo run -p strata-studio-server -- --atem 192.168.10.2
+```
+
+```bash
+cargo run -p strata-studio-server -- --vmix 192.168.10.3 --vmix-split 20 --vmix-pip 21
+```
+
+Avec l'ATEM, le 50/50 et la vignette sont des mises en page de la SuperSource (entrée 6000), dont Studio règle les cases. Avec vMix, ce sont deux entrées de mise en page à deux couches, préparées dans vMix (`--vmix-split`, `--vmix-pip`). Une coupe faite à la main au pupitre de l'ATEM ou dans vMix suspend l'IA.
+
 ```bash
 curl -s localhost:8095/api/state
 ```
@@ -57,7 +69,7 @@ Le journal (`/api/state`) montre l'intention comprise, le 50/50 préparé puis p
 | Crate | Rôle |
 | --- | --- |
 | `strata-studio-core` | le studio (places, caméras, plans, sources extérieures), la perception, les profils, le **Réalisateur** (fonction pure, testée sur des conversations scriptées) et l'**écoute** de l'animateur (des intentions tirées de ses phrases) |
-| `strata-studio-devices` | les interfaces des appareils (mélangeur, nodal, PTZ, console, Bitfocus), leurs simulateurs, la console Midas M32 (OSC) et les caméras Sony en VISCA over IP |
+| `strata-studio-devices` | les interfaces des appareils (mélangeur, nodal, PTZ, console, Bitfocus), leurs simulateurs, la console Midas M32 (OSC) les caméras Sony en VISCA over IP, et les mélangeurs **ATEM** (UDP 9910 : coupe, SuperSource, macros, lecture du programme) et **vMix** (TCP 8099 : coupe, couches des mises en page, tally) |
 | `strata-studio-sense` | l'oreille de l'animateur : son micro découpé en phrases, transcrites par un serveur whisper.cpp local, sans les textes que Whisper invente dans le silence ; l'exemple `ecoute` l'essaie sur un enregistrement |
 | `strata-studio-bench` | `banc-encodage` : combien de canaux 4:2:2 (H.264, H.265 ; 1080p50, 2160p50) la machine encode en temps réel |
 | `strata-studio-server` | l'exécutable `strata-studio` : studio simulé, API d'état et de reprise en main |

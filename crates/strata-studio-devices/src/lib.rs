@@ -3,15 +3,17 @@
 //!
 //! | Interface | Devices (planned) |
 //! | --- | --- |
-//! | [`Switcher`] | Blackmagic ATEM, all models (UDP 9910), vMix (TCP 8099) |
+//! | [`Switcher`] | Blackmagic ATEM, all models (UDP 9910, [`atem`]), vMix (TCP 8099, [`vmix`]) |
 //! | [`Router`] | Videohub (TCP 9990), NMOS IS-05 without a registry (ST 2110), NDI routing done by Studio |
 //! | [`Ptz`] | Sony FR7, BRC-AM7 (VISCA over IP, [`visca`]) |
 //! | [`AudioConsole`] | Midas M32 (OSC, [`m32`]), Yamaha DM5 (RCP) |
 //! | [`Automation`] | Bitfocus Buttons: lights (DMX), ON AIR, the rest |
 
+pub mod atem;
 pub mod m32;
 pub mod sim;
 pub mod visca;
+pub mod vmix;
 
 use thiserror::Error;
 
@@ -34,8 +36,35 @@ pub trait Switcher: Send {
     /// Cut the program to an input.
     fn cut(&mut self, input: u16) -> Result<()>;
     /// The input on the program, as the switcher says (a person on the
-    /// panel changes it too).
+    /// panel changes it too). A layout on air is not a camera input.
     fn program(&self) -> Option<u16>;
+    /// Put a picture on the program: an input, or a layout built by the
+    /// switcher (ATEM SuperSource, a vMix layout input).
+    fn show(&mut self, shown: Shown) -> Result<()>;
+    /// Set a layout up without taking it, so that it is ready.
+    fn preload(&mut self, _shown: Shown) -> Result<()> {
+        Ok(())
+    }
+    /// Simulation only: a person cuts on the panel. False on a real switcher.
+    fn demo_panel_cut(&mut self, _input: u16) -> bool {
+        false
+    }
+}
+
+/// What the switcher puts on the program, by switcher input numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shown {
+    Input(u16),
+    /// Side by side, half and half.
+    Split {
+        left: u16,
+        right: u16,
+    },
+    /// `main` full frame, `inset` in a small box.
+    Pip {
+        main: u16,
+        inset: u16,
+    },
 }
 
 /// A video router: the plant's « nodal » (Videohub in SDI, IS-05 in ST 2110,

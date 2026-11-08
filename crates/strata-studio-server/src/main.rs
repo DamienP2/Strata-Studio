@@ -1,6 +1,7 @@
 //! strata-studio: the Strata Studio server.
 //!
-//! For now it runs a **simulated studio** (switcher, four PTZ, console,
+//! For now it runs a **simulated studio** (switcher unless `--atem` or
+//! `--vmix` is given, four PTZ, console,
 //! Bitfocus, a scripted conversation) directed live by the Director, and
 //! serves its state and the takeover commands:
 //!
@@ -32,8 +33,10 @@ use strata_studio_core::{
     CamId, CamState, Composite, Control, Decision, Director, Forced, Heard, Hint, Listener, Mode,
     Perception, Profile, RemoteId, RemoteState, SeatId, ShotId, ShotKind, StudioSetup, Subject,
 };
+use strata_studio_devices::atem::{AtemLayout, AtemSwitcher};
 use strata_studio_devices::sim::{SimAutomation, SimConsole, SimPtz, SimSwitcher};
-use strata_studio_devices::{AudioConsole, Automation, Ptz, Switcher};
+use strata_studio_devices::vmix::{VmixLayout, VmixSwitcher};
+use strata_studio_devices::{AudioConsole, Automation, Ptz, Shown, Switcher};
 
 #[derive(Parser)]
 #[command(
@@ -48,6 +51,44 @@ struct Args {
     /// Directing profile: 0 podcast, 1 débat, 2 interview, 3 radio.
     #[arg(long, default_value_t = 0)]
     profile: usize,
+    /// Drive a real ATEM at this address (else a simulated switcher).
+    #[arg(long)]
+    atem: Option<String>,
+    /// Drive a real vMix at this address (else a simulated switcher).
+    #[arg(long)]
+    vmix: Option<String>,
+    /// vMix: the layout input with two layers for the side by side.
+    #[arg(long, default_value_t = 20)]
+    vmix_split: u16,
+    /// vMix: the layout input with two layers for the picture in picture.
+    #[arg(long, default_value_t = 21)]
+    vmix_pip: u16,
+}
+
+/// The switcher: a real one when its address is given, else the simulated one.
+fn switcher(args: &Args) -> anyhow::Result<Box<dyn Switcher>> {
+    let addr = |a: &str, port: u16| -> anyhow::Result<std::net::SocketAddr> {
+        let with_port = if a.contains(':') {
+            a.to_string()
+        } else {
+            format!("{a}:{port}")
+        };
+        with_port.parse().with_context(|| format!("adresse : {a}"))
+    };
+    Ok(match (&args.atem, &args.vmix) {
+        (Some(a), _) => Box::new(AtemSwitcher::connect(
+            addr(a, strata_studio_devices::atem::PORT)?,
+            AtemLayout::default(),
+        )?),
+        (None, Some(v)) => Box::new(VmixSwitcher::connect(
+            addr(v, strata_studio_devices::vmix::PORT)?,
+            VmixLayout {
+                split_input: args.vmix_split,
+                pip_input: args.vmix_pip,
+            },
+        )?),
+        (None, None) => Box::new(SimSwitcher::new()),
+    })
 }
 
 /// The program's frame period.
@@ -66,7 +107,7 @@ struct Entry {
 struct App {
     director: Director,
     control: Control,
-    switcher: SimSwitcher,
+    switcher: Box<dyn Switcher>,
     ptz: BTreeMap<CamId, SimPtz>,
     console: SimConsole,
     automation: SimAutomation,
@@ -85,7 +126,7 @@ struct App {
 type Shared = Arc<Mutex<App>>;
 
 impl App {
-    fn new(profile: Profile) -> Self {
+    fn new(profile: Profile, switcher: Box<dyn Switcher>) -> Self {
         let setup = StudioSetup::example();
         let first = [(1, 1), (2, 1), (3, 2), (4, 3)];
         let ptz = first
@@ -105,7 +146,7 @@ impl App {
             drive_until: BTreeMap::new(),
             director: Director::new(setup, profile),
             control: Control::default(),
-            switcher: SimSwitcher::new(),
+            switcher,
             ptz,
             console: SimConsole::default(),
             automation: SimAutomation::default(),
@@ -130,6 +171,52 @@ impl App {
         while self.journal.len() > JOURNAL {
             self.journal.pop_front();
         }
+    }
+
+    /// The camera framed on a seat's close shot, if any (else the wide one).
+    fn camera_on(&self, seat: SeatId) -> Option<CamId> {
+        let setup = self.director.setup();
+        let framed = |kind: ShotKind| {
+            setup
+                .shots
+                .iter()
+                .find(|s| {
+                    s.kind == kind
+                        && self
+                            .last
+                            .cam(s.camera)
+                            .is_some_and(|c| c.framed == Some(s.id))
+                })
+                .map(|s| s.camera)
+        };
+        framed(ShotKind::Single(seat)).or_else(|| framed(ShotKind::Wide))
+    }
+
+    /// A composite as switcher inputs: seats by the cameras given (in
+    /// order), remote sources by their own input.
+    fn shown(&self, c: &Composite, cameras: &[CamId]) -> Option<Shown> {
+        let setup = self.director.setup();
+        let mut cams = cameras.iter();
+        let mut input = |s: &Subject| -> Option<u16> {
+            match s {
+                Subject::Seat(_) => cams
+                    .next()
+                    .and_then(|c| setup.camera(*c))
+                    .map(|c| c.switcher_input),
+                Subject::Remote(r) => setup.remote(*r).map(|r| r.switcher_input),
+            }
+        };
+        Some(match c {
+            Composite::Full { remote } => Shown::Input(setup.remote(*remote)?.switcher_input),
+            Composite::Split { left, right } => Shown::Split {
+                left: input(left)?,
+                right: input(right)?,
+            },
+            Composite::Pip { main, inset } => Shown::Pip {
+                main: input(main)?,
+                inset: input(inset)?,
+            },
+        })
     }
 
     fn composite_label(&self, c: &Composite) -> String {
@@ -307,8 +394,18 @@ impl App {
                 let why = reason.describe(self.director.setup());
                 let what = self.composite_label(&program);
                 let cams: Vec<String> = cameras.iter().map(|c| format!("Cam {}", c.0)).collect();
-                // The simulated switcher has no layouts: a real one sets its
-                // SuperSource (ATEM) or layout input (vMix), then takes it.
+                if auto {
+                    match self
+                        .shown(&program, &cameras)
+                        .map(|s| self.switcher.show(s))
+                    {
+                        Some(Err(e)) => self.log(format!("mise en page refusée : {e}"), false),
+                        None => {
+                            self.log("mise en page impossible : une entrée manque".into(), false)
+                        }
+                        _ => {}
+                    }
+                }
                 self.log(
                     format!("COMPOSE → {what} [{}]{shadow} — {why}", cams.join(", ")),
                     auto,
@@ -316,6 +413,18 @@ impl App {
             }
             Decision::Preload { program, .. } => {
                 let what = self.composite_label(&program);
+                if auto {
+                    // Which camera shows the host is only known when it is taken.
+                    let host_cam = self
+                        .director
+                        .setup()
+                        .host_seat()
+                        .and_then(|h| self.camera_on(h));
+                    if let Some(s) = self.shown(&program, &host_cam.into_iter().collect::<Vec<_>>())
+                    {
+                        let _ = self.switcher.preload(s);
+                    }
+                }
                 self.log(format!("prépare en coulisse : {what}{shadow}"), auto);
             }
             Decision::Drift {
@@ -525,7 +634,9 @@ async fn profile(State(app): State<Shared>, Path(n): Path<usize>) -> StatusCode 
 }
 
 async fn panel_cut(State(app): State<Shared>, Path(input): Path<u16>) -> StatusCode {
-    app.lock().unwrap().switcher.panel_cut(input);
+    if !app.lock().unwrap().switcher.demo_panel_cut(input) {
+        return StatusCode::CONFLICT;
+    }
     StatusCode::NO_CONTENT
 }
 
@@ -597,7 +708,9 @@ async fn main() -> anyhow::Result<()> {
         .into_iter()
         .nth(args.profile)
         .context("profil inconnu (0 à 3)")?;
-    let app: Shared = Arc::new(Mutex::new(App::new(profile)));
+    let sw = switcher(&args)?;
+    tracing::info!("mélangeur : {}", sw.name());
+    let app: Shared = Arc::new(Mutex::new(App::new(profile, sw)));
     {
         let mut a = app.lock().unwrap();
         let names = [

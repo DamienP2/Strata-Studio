@@ -119,6 +119,11 @@ Les règles de subtilité :
 
 Chaque intention comprise s'écrit dans le journal, avec sa phrase.
 
+### 2.6 Les mélangeurs
+
+- **ATEM** (tous les modèles, UDP 9910) : coupe par l'entrée programme ; le 50/50 et la vignette sont des mises en page de la **SuperSource**, dont Studio règle les cases (source, position, taille) avant de la prendre ; Studio lit l'entrée programme pour voir une coupe faite au pupitre. La géométrie des cases est un réglage ; le format des commandes SuperSource est celui des ATEM récents et **reste à valider sur l'ATEM du studio**.
+- **vMix** (TCP 8099) : coupe directe ; le 50/50 et la vignette sont **deux entrées de mise en page à deux couches** préparées dans vMix, dont Studio remplit les couches avant de les prendre ; le tally abonné donne le programme.
+
 ### 2.6 Ce qui est piloté par Buttons
 
 L'**allumage** au début et l'**extinction** à la fin (lumière par défaut, caméras) passent par Bitfocus Buttons, comme le reste des automations ; la mise sous tension des caméras peut aussi se faire en VISCA. Le **Stream Deck** passe aussi par Buttons (§ 3.2).
