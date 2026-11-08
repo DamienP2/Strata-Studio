@@ -11,7 +11,7 @@
 
 | Domaine | Ce que fait Studio |
 | --- | --- |
-| **Réalisation** | IA locale qui commute un **ATEM** ou un **vMix** ; **débrayage manuel** possible à tout moment |
+| **Réalisation** | IA locale qui commute un **ATEM** ou un **vMix** ; **débrayage manuel** possible à tout moment ; **écoute de l'animateur** pour anticiper (50/50, vignette, plein cadre, parole donnée, § 2.5) |
 | **Caméras** | **Sony FR7 ou BRC-AM7** (mêmes protocoles : VISCA over IP, CGI) ; cadrage qui suit les personnes |
 | **Audio** | micros reçus en **Dante** ou **AES67 / ST 2110-30**, au travers d'une console **Yamaha DM5** ou **Midas M32** |
 | **Entrée des images** | **SDI** (cartes DeckLink), **NDI** et **ST 2110** |
@@ -84,7 +84,39 @@ Jusqu'ici Studio ne faisait que piloter. **L'enregistrement et une partie de la 
 L'API ne documente **ni les niveaux audio ni le tally** : pendant les tests, le son d'un appel se mesure à son arrivée sur le mélangeur, comme pour une personne du plateau.
 - **Agence de presse** et **duplex Aviwest** : une entrée du mélangeur chacun, testée comme une personne (image et son) à l'étape 12.
 
-### 2.5 Ce qui est piloté par Buttons
+### 2.5 L'écoute de l'animateur
+
+Une petite IA de **reconnaissance vocale**, locale (Whisper sur la carte du serveur), écoute **le seul micro de l'animateur** et anticipe ses besoins. Ce qu'elle comprend est une **intention**, jamais un ordre :
+
+| L'animateur dit | Studio comprend | Studio fait |
+| --- | --- | --- |
+| « Tout à l'heure, on retrouvera Julie en duplex » | duplex, **plus tard** | rien à l'image ; l'intention est notée |
+| « Dans un instant, notre invité en ligne… » | call, **bientôt** | prépare le 50/50 en coulisse (SuperSource, layout vMix) |
+| « On retrouve tout de suite Julie en duplex, bonjour Julie ! » | duplex, **maintenant**, très sûr | **50/50 à la fin de sa phrase**, ou dès que Julie parle |
+| « On l'écoute en grand » / « côte à côte » / « en vignette » | la mise en page demandée | plein cadre, 50/50 ou vignette |
+| « Alice, qu'en pensez-vous ? » | la parole donnée à Alice | sa caméra se cadre, et l'image passe sur Alice **à la fin de la question, avant sa réponse** |
+| « Merci Julie, on revient en plateau » | retour plateau | quand Julie se tait, retour sur l'animateur |
+| « Pas de duplex aujourd'hui » | une négation | rien |
+
+Puis l'image **suit la conversation** avec la source extérieure :
+- 50/50 tant qu'ils échangent ;
+- la source **plein cadre** quand elle parle longtemps ;
+- l'animateur **en vignette** sur une très longue réponse, pour montrer qu'il écoute ;
+- retour au 50/50 dès qu'on lui répond en plateau.
+
+Une source qui prend la parole **sans avoir été annoncée** passe en 50/50 après deux secondes. Une source **perdue** ramène au plateau.
+
+Les règles de subtilité :
+- **le bon moment** : la fin d'une phrase de l'animateur, ou les premiers mots de la personne visée ;
+- **la confiance** : prénom, type de source, verbe d'arrivée, question ; une intention faible prépare, une intention forte et « maintenant » agit ;
+- **le rythme** : les durées minimales de plan sont respectées ;
+- **les caméras d'un 50/50 sont à l'antenne** : elles ne bougent pas ;
+- **l'oubli** : une intention qui n'est suivie de rien est oubliée (quelques secondes pour « maintenant », quelques minutes pour « tout à l'heure ») ;
+- **seul l'animateur** pilote : ce que disent les invités ne déclenche rien.
+
+Chaque intention comprise s'écrit dans le journal, avec sa phrase.
+
+### 2.6 Ce qui est piloté par Buttons
 
 L'**allumage** au début et l'**extinction** à la fin (lumière par défaut, caméras) passent par Bitfocus Buttons, comme le reste des automations ; la mise sous tension des caméras peut aussi se faire en VISCA. Le **Stream Deck** passe aussi par Buttons (§ 3.2).
 

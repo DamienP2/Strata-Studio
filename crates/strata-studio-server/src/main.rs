@@ -14,6 +14,8 @@
 //! | `POST /api/control/lock/{cam}` · `/unlock/{cam}` | the AI leaves a camera alone |
 //! | `POST /api/control/profile/{n}` | profile: 0 podcast, 1 débat, 2 interview, 3 radio |
 //! | `POST /api/demo/panel-cut/{input}` | simulate a person cutting on the switcher's panel |
+//! | `POST /api/demo/say` | simulate the host's words (`{"text": "On retrouve Julie en duplex"}`), as the speech recogniser would give them |
+//! | `POST /api/demo/remote/{id}/voice/{on}` | simulate a remote source speaking (`on` = 1) or silent (0) |
 
 use anyhow::Context;
 use axum::extract::{Path, Query, State};
@@ -27,8 +29,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use strata_studio_core::script::Script;
 use strata_studio_core::{
-    CamId, CamState, Control, Decision, Director, Forced, Mode, Perception, Profile, SeatId,
-    ShotId, ShotKind, StudioSetup,
+    CamId, CamState, Composite, Control, Decision, Director, Forced, Heard, Hint, Listener, Mode,
+    Perception, Profile, RemoteId, RemoteState, SeatId, ShotId, ShotKind, StudioSetup, Subject,
 };
 use strata_studio_devices::sim::{SimAutomation, SimConsole, SimPtz, SimSwitcher};
 use strata_studio_devices::{AudioConsole, Automation, Ptz, Switcher};
@@ -72,6 +74,9 @@ struct App {
     start: Instant,
     last: Perception,
     journal: VecDeque<Entry>,
+    listener: Listener,
+    heard: Vec<Hint>,
+    remote_voice: BTreeMap<RemoteId, bool>,
 }
 
 type Shared = Arc<Mutex<App>>;
@@ -90,6 +95,9 @@ impl App {
             })
             .collect();
         App {
+            listener: Listener::new(&setup),
+            heard: Vec::new(),
+            remote_voice: BTreeMap::new(),
             director: Director::new(setup, profile),
             control: Control::default(),
             switcher: SimSwitcher::new(),
@@ -116,6 +124,18 @@ impl App {
         });
         while self.journal.len() > JOURNAL {
             self.journal.pop_front();
+        }
+    }
+
+    fn composite_label(&self, c: &Composite) -> String {
+        let setup = self.director.setup();
+        let name = |s: &Subject| setup.subject_name(*s);
+        match c {
+            Composite::Full { remote } => format!("{} plein cadre", setup.remote_name(*remote)),
+            Composite::Split { left, right } => format!("{} | {} (50/50)", name(left), name(right)),
+            Composite::Pip { main, inset } => {
+                format!("{} avec {} en vignette", name(main), name(inset))
+            }
         }
     }
 
@@ -174,12 +194,23 @@ impl App {
             .and_then(|i| setup.camera_on_input(i))
             .map(|c| c.id);
         let mics = self.script.mics(setup.seats.iter().map(|s| s.id), t);
+        let remotes = setup
+            .remotes
+            .iter()
+            .map(|r| RemoteState {
+                remote: r.id,
+                online: true,
+                voice: self.remote_voice.get(&r.id).copied().unwrap_or(false),
+            })
+            .collect();
         Perception {
             t_ms: t,
             mics,
             cams,
             program,
-            next_speaker: vec![],
+            remotes,
+            hints: std::mem::take(&mut self.heard),
+            ..Default::default()
         }
     }
 
@@ -245,6 +276,37 @@ impl App {
                 let _ = self.automation.set_variable("studio_speaker", &name);
                 self.log(format!("parole : {name}"), true);
             }
+            Decision::Compose {
+                program,
+                cameras,
+                reason,
+            } => {
+                let why = reason.describe(self.director.setup());
+                let what = self.composite_label(&program);
+                let cams: Vec<String> = cameras.iter().map(|c| format!("Cam {}", c.0)).collect();
+                // The simulated switcher has no layouts: a real one sets its
+                // SuperSource (ATEM) or layout input (vMix), then takes it.
+                self.log(
+                    format!("COMPOSE → {what} [{}]{shadow} — {why}", cams.join(", ")),
+                    auto,
+                );
+            }
+            Decision::Preload { program, .. } => {
+                let what = self.composite_label(&program);
+                self.log(format!("prépare en coulisse : {what}{shadow}"), auto);
+            }
+            Decision::Understood { hint } => {
+                self.log(
+                    format!(
+                        "compris : « {} » ({:?}, {:?}, {:.0} %)",
+                        hint.heard,
+                        hint.target,
+                        hint.when,
+                        hint.confidence * 100.0
+                    ),
+                    true,
+                );
+            }
             Decision::HumanTookOver { program } => {
                 self.control.mode = Mode::Manual {
                     by: "pupitre".into(),
@@ -305,6 +367,7 @@ async fn guests(State(app): State<Shared>, Json(names): Json<HashMap<u8, String>
             strips.push((seat.mic.console_channel, seat.display_name().to_string()));
         }
     }
+    app.listener = Listener::new(app.director.setup());
     for (ch, name) in strips {
         let _ = app.console.set_name(ch, &name);
     }
@@ -408,6 +471,43 @@ async fn panel_cut(State(app): State<Shared>, Path(input): Path<u16>) -> StatusC
     StatusCode::NO_CONTENT
 }
 
+#[derive(Deserialize)]
+struct Say {
+    text: String,
+    #[serde(default)]
+    seat: Option<u8>,
+}
+
+async fn say(State(app): State<Shared>, Json(said): Json<Say>) -> StatusCode {
+    let mut app = app.lock().unwrap();
+    let seat = said
+        .seat
+        .map(SeatId)
+        .or_else(|| app.director.setup().host_seat())
+        .unwrap_or(SeatId(1));
+    let heard = Heard {
+        t_ms: app.now(),
+        seat,
+        text: said.text,
+        is_final: true,
+    };
+    let hints = app.listener.hear(&heard);
+    if hints.is_empty() {
+        app.log(format!("entendu, rien à faire : « {} »", heard.text), true);
+    }
+    app.heard.extend(hints);
+    StatusCode::NO_CONTENT
+}
+
+async fn remote_voice(State(app): State<Shared>, Path((id, on)): Path<(u8, u8)>) -> StatusCode {
+    let mut app = app.lock().unwrap();
+    if app.director.setup().remote(RemoteId(id)).is_none() {
+        return StatusCode::NOT_FOUND;
+    }
+    app.remote_voice.insert(RemoteId(id), on != 0);
+    StatusCode::NO_CONTENT
+}
+
 fn router(app: Shared) -> Router {
     Router::new()
         .route("/api/health", get(|| async { "ok" }))
@@ -422,6 +522,8 @@ fn router(app: Shared) -> Router {
         .route("/api/control/unlock/{cam}", post(unlock))
         .route("/api/control/profile/{n}", post(profile))
         .route("/api/demo/panel-cut/{input}", post(panel_cut))
+        .route("/api/demo/say", post(say))
+        .route("/api/demo/remote/{id}/voice/{on}", post(remote_voice))
         .with_state(app)
 }
 
@@ -453,6 +555,16 @@ async fn main() -> anyhow::Result<()> {
                 .find(|(n, _)| SeatId(*n) == seat.id)
                 .map(|(_, g)| g.to_string());
         }
+        if let Some(duplex) = a
+            .director
+            .setup_mut()
+            .remotes
+            .iter_mut()
+            .find(|r| r.id == RemoteId(2))
+        {
+            duplex.guest = Some("Julie Roux".into());
+        }
+        a.listener = Listener::new(a.director.setup());
         a.log(
             "studio simulé : 5 places, 4 PTZ, conversation de démonstration".into(),
             true,

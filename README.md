@@ -40,11 +40,23 @@ curl -X POST localhost:8095/api/demo/panel-cut/2
 
 La dernière commande simule une personne qui coupe sur le pupitre du mélangeur : l'IA se suspend d'elle-même.
 
+L'écoute de l'animateur, comme si la reconnaissance vocale avait entendu sa phrase :
+
+```bash
+curl -X POST localhost:8095/api/demo/say -H 'content-type: application/json' -d '{"text": "On retrouve tout de suite Julie en duplex, bonjour Julie !"}'
+```
+
+```bash
+curl -X POST localhost:8095/api/demo/remote/2/voice/1
+```
+
+Le journal (`/api/state`) montre l'intention comprise, le 50/50 préparé puis pris à la fin de la phrase, et le plein cadre quand Julie parle longtemps.
+
 ## Code
 
 | Crate | Rôle |
 | --- | --- |
-| `strata-studio-core` | le studio (places, caméras, plans), la perception, les profils, le **Réalisateur** : une fonction pure, testée sur une conversation scriptée |
+| `strata-studio-core` | le studio (places, caméras, plans, sources extérieures), la perception, les profils, le **Réalisateur** (fonction pure, testée sur des conversations scriptées) et l'**écoute** de l'animateur (des intentions tirées de ses phrases) |
 | `strata-studio-devices` | les interfaces des appareils (mélangeur, nodal, PTZ, console, Bitfocus), leurs simulateurs, la console Midas M32 (OSC) |
 | `strata-studio-server` | l'exécutable `strata-studio` : studio simulé, API d'état et de reprise en main |
 

@@ -20,10 +20,22 @@
 //!
 //! A cut that the switcher shows and Studio did not ask for is a person's
 //! hand on the panel: [`Decision::HumanTookOver`].
+//!
+//! **Spoken cues** ([`crate::speech`]) are intentions, not orders. A weak or
+//! early one only prepares (the layout in the switcher, the host's camera);
+//! a strong one announced for now is acted on at a natural moment: the end
+//! of the host's sentence, or the first words of the person given the
+//! floor. With a remote source on air, the picture then follows the
+//! conversation: side by side while they talk together, the remote full
+//! frame when it speaks long, the host in a box on a very long answer, and
+//! back to the set when the host says goodbye and the remote is silent.
 
-use crate::model::{CamId, SeatId, Shot, ShotId, ShotKind, StudioSetup};
+use crate::model::{
+    CamId, Composite, RemoteId, RemoteKind, SeatId, Shot, ShotId, ShotKind, StudioSetup, Subject,
+};
 use crate::perception::Perception;
 use crate::profile::Profile;
+use crate::speech::{Hint, Layout, Target, When};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -78,14 +90,46 @@ impl Default for Control {
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum Reason {
     Opening,
-    Speaker { seat: SeatId },
-    Together { seats: Vec<SeatId> },
+    Speaker {
+        seat: SeatId,
+    },
+    Together {
+        seats: Vec<SeatId>,
+    },
     Silence,
     HeldTooLong,
     Forced,
     CameraLost,
-    MaySpeak { seat: SeatId },
+    MaySpeak {
+        seat: SeatId,
+    },
     Fallback,
+    /// The host announced the remote source.
+    GoRemote {
+        remote: RemoteId,
+    },
+    /// The remote source speaks, long enough to be seen alone.
+    RemoteSpeaks {
+        remote: RemoteId,
+    },
+    /// A very long answer: the host is shown listening.
+    Listening {
+        remote: RemoteId,
+    },
+    /// The remote source started speaking without being announced.
+    RemoteUnannounced {
+        remote: RemoteId,
+    },
+    /// The host said goodbye to the remote source.
+    BackToSet,
+    /// The remote source is gone.
+    RemoteLost {
+        remote: RemoteId,
+    },
+    /// The host gave the floor to this guest.
+    Addressed {
+        seat: SeatId,
+    },
 }
 
 impl Reason {
@@ -104,6 +148,26 @@ impl Reason {
             Reason::CameraLost => "caméra perdue ou verrouillée".into(),
             Reason::MaySpeak { seat } => format!("{} pourrait parler", setup.seat_name(*seat)),
             Reason::Fallback => "plan de repli prêt".into(),
+            Reason::GoRemote { remote } => {
+                format!("l'animateur annonce {}", setup.remote_name(*remote))
+            }
+            Reason::RemoteSpeaks { remote } => {
+                format!("{} parle : plein cadre", setup.remote_name(*remote))
+            }
+            Reason::Listening { remote } => format!(
+                "longue réponse de {} : l'animateur écoute en vignette",
+                setup.remote_name(*remote)
+            ),
+            Reason::RemoteUnannounced { remote } => {
+                format!("{} prend la parole", setup.remote_name(*remote))
+            }
+            Reason::BackToSet => "l'animateur revient en plateau".into(),
+            Reason::RemoteLost { remote } => {
+                format!("{} perdu : retour en plateau", setup.remote_name(*remote))
+            }
+            Reason::Addressed { seat } => {
+                format!("l'animateur donne la parole à {}", setup.seat_name(*seat))
+            }
         }
     }
 }
@@ -128,6 +192,31 @@ pub enum Decision {
     Speaker { seat: Option<SeatId> },
     /// The switcher shows a camera Studio did not ask for.
     HumanTookOver { program: Option<CamId> },
+    /// Put a composite on the program (a remote alone, side by side, a box);
+    /// `cameras` are the cameras showing the seats in it, in order.
+    Compose {
+        program: Composite,
+        cameras: Vec<CamId>,
+        reason: Reason,
+    },
+    /// Set a composite up off air (ATEM SuperSource, vMix layout), so that
+    /// it is ready when it is taken.
+    Preload { program: Composite, reason: Reason },
+    /// A spoken cue was understood (for the journal).
+    Understood { hint: Hint },
+}
+
+#[derive(Clone, Debug)]
+struct Intent {
+    hint: Hint,
+    until_ms: u64,
+}
+
+fn seat_of(s: Subject) -> Option<SeatId> {
+    match s {
+        Subject::Seat(x) => Some(x),
+        Subject::Remote(_) => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -165,6 +254,12 @@ pub struct Director {
     recent: VecDeque<ShotId>,
     prepared: BTreeMap<CamId, (ShotId, u64)>,
     was_manual: bool,
+    intents: Vec<Intent>,
+    remote_voice_since: BTreeMap<RemoteId, u64>,
+    remote_gone_since: BTreeMap<RemoteId, u64>,
+    /// The composite on air, since when, and the cameras in it.
+    composite: Option<(Composite, u64, Vec<CamId>)>,
+    preloaded: Option<Composite>,
 }
 
 impl Director {
@@ -182,6 +277,11 @@ impl Director {
             recent: VecDeque::new(),
             prepared: BTreeMap::new(),
             was_manual: false,
+            intents: Vec::new(),
+            remote_voice_since: BTreeMap::new(),
+            remote_gone_since: BTreeMap::new(),
+            composite: None,
+            preloaded: None,
         }
     }
 
@@ -211,26 +311,35 @@ impl Director {
         self.speaker
     }
 
+    /// The composite on air, if the program is not a single camera shot.
+    pub fn composite(&self) -> Option<Composite> {
+        self.composite.as_ref().map(|(c, _, _)| *c)
+    }
+
     /// Called at each frame of the program.
     pub fn tick(&mut self, p: &Perception, c: &Control) -> Vec<Decision> {
         let t = p.t_ms;
         let mut out = Vec::new();
         self.listen(p, &mut out);
+        self.hear(p, t, &mut out);
 
         if matches!(c.mode, Mode::Manual { .. }) {
             self.was_manual = true;
             self.expected = None;
+            self.composite = None;
             return out;
         }
         // Coming back from a person's hand, or starting while the switcher
         // already shows something: carry on from the shot on air, no cut.
-        if self.was_manual || (self.on_air.is_none() && p.program.is_some()) {
+        if self.was_manual
+            || (self.on_air.is_none() && self.composite.is_none() && p.program.is_some())
+        {
             self.was_manual = false;
             if let Some(cam) = p.program {
                 self.adopt(cam, p, t);
             }
         }
-        if c.mode == Mode::Auto {
+        if c.mode == Mode::Auto && self.composite.is_none() {
             if let (Some((cam, at)), Some(program)) = (self.expected, p.program) {
                 if program != cam && t.saturating_sub(at) >= self.profile.human_cut_grace_ms {
                     self.expected = None;
@@ -247,9 +356,469 @@ impl Director {
             self.force(f.shot, p, t, &mut out);
             return out;
         }
-        self.direct(p, c, t, &mut out);
+        if !self.direct_remote(p, c, t, &mut out) && !self.act_on_intents(p, c, t, &mut out) {
+            self.direct(p, c, t, &mut out);
+        }
         self.prepare_cameras(p, c, t, &mut out);
         out
+    }
+
+    /// The remote sources' voices and presence, and the cues heard.
+    fn hear(&mut self, p: &Perception, t: u64, out: &mut Vec<Decision>) {
+        for r in &p.remotes {
+            if r.voice && r.online {
+                self.remote_voice_since.entry(r.remote).or_insert(t);
+            } else {
+                self.remote_voice_since.remove(&r.remote);
+            }
+            if r.online {
+                self.remote_gone_since.remove(&r.remote);
+            } else {
+                self.remote_gone_since.entry(r.remote).or_insert(t);
+            }
+        }
+        for h in &p.hints {
+            self.intents.retain(|i| i.hint.target != h.target);
+            let life = match h.when {
+                When::Now => self.profile.cue_life_ms,
+                When::Soon => self.profile.cue_life_ms * 3,
+                When::Later => self.profile.cue_life_ms * 18,
+            };
+            self.intents.push(Intent {
+                hint: h.clone(),
+                until_ms: t + life,
+            });
+            out.push(Decision::Understood { hint: h.clone() });
+        }
+        self.intents.retain(|i| t <= i.until_ms);
+    }
+
+    fn host(&self) -> Option<SeatId> {
+        self.setup.host_seat()
+    }
+
+    /// The host has just finished a sentence.
+    fn host_paused(&self, t: u64) -> bool {
+        let Some(h) = self.host() else { return false };
+        !self.voice_since.contains_key(&h)
+            && self.last_voice.get(&h).is_some_and(|l| {
+                let d = t.saturating_sub(*l);
+                d >= self.profile.phrase_end_ms && d <= 4000
+            })
+    }
+
+    /// How long the remote source has been speaking, once it is speech.
+    fn remote_speaking(&self, r: RemoteId, t: u64) -> Option<u64> {
+        self.remote_voice_since
+            .get(&r)
+            .map(|s| t.saturating_sub(*s))
+            .filter(|d| *d >= self.profile.speech_onset_ms)
+    }
+
+    /// The person of the set speaking now, and for how long.
+    fn seat_speaking(&self, t: u64) -> Option<(SeatId, u64)> {
+        let s = match &self.situation {
+            Situation::Speaking(s) => *s,
+            Situation::Together(xs) => *xs.first()?,
+            _ => return None,
+        };
+        Some((s, t.saturating_sub(*self.voice_since.get(&s)?)))
+    }
+
+    fn intent(&self, target: Target) -> Option<&Hint> {
+        self.intents
+            .iter()
+            .find(|i| i.hint.target == target)
+            .map(|i| &i.hint)
+    }
+
+    fn drop_intent(&mut self, target: Target) {
+        self.intents.retain(|i| i.hint.target != target);
+    }
+
+    /// How the remote source is shown in the layout asked for.
+    fn composite_for(&self, r: RemoteId, layout: Layout, with: Option<SeatId>) -> Composite {
+        let seat = with.or(self.host()).unwrap_or(SeatId(1));
+        match layout {
+            Layout::Full => Composite::Full { remote: r },
+            Layout::Split => Composite::Split {
+                left: Subject::Seat(seat),
+                right: Subject::Remote(r),
+            },
+            Layout::Pip => Composite::Pip {
+                main: Subject::Remote(r),
+                inset: Subject::Seat(seat),
+            },
+        }
+    }
+
+    /// The camera showing a seat in a composite: its close shot if one is
+    /// framed, else the wide shot.
+    fn camera_for(&self, seat: SeatId, p: &Perception, c: &Control) -> Option<CamId> {
+        let single = self
+            .setup
+            .shots
+            .iter()
+            .find(|s| s.kind == ShotKind::Single(seat) && self.usable(s, p, c));
+        let wide = self
+            .setup
+            .shots
+            .iter()
+            .find(|s| s.kind == ShotKind::Wide && self.usable(s, p, c));
+        single.or(wide).map(|s| s.camera)
+    }
+
+    fn compose(
+        &mut self,
+        program: Composite,
+        reason: Reason,
+        p: &Perception,
+        c: &Control,
+        t: u64,
+        out: &mut Vec<Decision>,
+    ) {
+        let seats: Vec<SeatId> = match program {
+            Composite::Full { .. } => vec![],
+            Composite::Split { left, right } => {
+                [left, right].into_iter().filter_map(seat_of).collect()
+            }
+            Composite::Pip { main, inset } => {
+                [main, inset].into_iter().filter_map(seat_of).collect()
+            }
+        };
+        // A seat already shown keeps its camera.
+        let kept = self
+            .composite
+            .as_ref()
+            .map(|(_, _, cams)| cams.clone())
+            .unwrap_or_default();
+        let on_air_cam = self
+            .on_air
+            .and_then(|o| self.setup.shot(o.shot))
+            .map(|s| (s.kind.clone(), s.camera));
+        let cameras: Vec<CamId> = seats
+            .iter()
+            .filter_map(|seat| {
+                if let Some((ShotKind::Single(x), cam)) = &on_air_cam {
+                    if x == seat {
+                        return Some(*cam);
+                    }
+                }
+                kept.iter()
+                    .copied()
+                    .find(|cam| {
+                        p.cam(*cam)
+                            .and_then(|s| s.framed)
+                            .and_then(|f| self.setup.shot(f))
+                            .is_some_and(|s| s.kind == ShotKind::Single(*seat))
+                    })
+                    .or_else(|| self.camera_for(*seat, p, c))
+            })
+            .collect();
+        self.composite = Some((program, t, cameras.clone()));
+        self.on_air = None;
+        self.expected = None;
+        self.preloaded = None;
+        out.push(Decision::Compose {
+            program,
+            cameras,
+            reason,
+        });
+    }
+
+    /// Back to the set: the person speaking, else the wide shot.
+    fn leave_remote(
+        &mut self,
+        reason: Reason,
+        p: &Perception,
+        c: &Control,
+        t: u64,
+        out: &mut Vec<Decision>,
+    ) {
+        self.composite = None;
+        self.preloaded = None;
+        let speaking = self.seat_speaking(t).map(|(s, _)| s);
+        let pick = |kind: ShotKind| {
+            self.setup
+                .shots
+                .iter()
+                .find(|s| s.kind == kind && self.usable(s, p, c))
+                .cloned()
+        };
+        let shot = speaking
+            .and_then(|s| pick(ShotKind::Single(s)))
+            .or_else(|| pick(ShotKind::Wide))
+            .or_else(|| {
+                self.setup
+                    .shots
+                    .iter()
+                    .find(|s| self.usable(s, p, c))
+                    .cloned()
+            });
+        if let Some(shot) = shot {
+            self.cut(&shot, reason, t, out);
+        }
+    }
+
+    /// With the set on air: act on the cues heard, at the right moment.
+    /// Returns whether a decision was taken.
+    fn act_on_intents(
+        &mut self,
+        p: &Perception,
+        c: &Control,
+        t: u64,
+        out: &mut Vec<Decision>,
+    ) -> bool {
+        let held = self
+            .on_air
+            .map_or(u64::MAX, |o| t.saturating_sub(o.since_ms));
+        let online = |r: RemoteId| p.remote(r).is_some_and(|s| s.online);
+
+        let best = self
+            .intents
+            .iter()
+            .filter_map(|i| match i.hint.target {
+                Target::Remote(r) if online(r) => Some((r, i.hint.clone())),
+                _ => None,
+            })
+            .max_by(|a, b| {
+                a.1.confidence
+                    .partial_cmp(&b.1.confidence)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        if let Some((r, h)) = best {
+            let comp = self.composite_for(r, h.layout.unwrap_or(Layout::Split), None);
+            if h.when != When::Later && h.confidence >= 0.4 && self.preloaded != Some(comp) {
+                self.preloaded = Some(comp);
+                out.push(Decision::Preload {
+                    program: comp,
+                    reason: Reason::GoRemote { remote: r },
+                });
+            }
+            let moment = self.host_paused(t) || self.remote_speaking(r, t).is_some();
+            if h.when == When::Now
+                && h.confidence >= 0.6
+                && moment
+                && held >= self.profile.min_shot_ms / 2
+            {
+                self.drop_intent(Target::Remote(r));
+                self.compose(comp, Reason::GoRemote { remote: r }, p, c, t, out);
+                return true;
+            }
+        }
+
+        // A remote source speaking without having been announced.
+        if self.seat_speaking(t).is_none() && held >= self.profile.min_shot_ms {
+            let unannounced = p
+                .remotes
+                .iter()
+                .filter(|r| r.online)
+                .find(|r| {
+                    self.remote_speaking(r.remote, t)
+                        .is_some_and(|d| d >= 2 * self.profile.speech_onset_ms)
+                })
+                .map(|r| r.remote);
+            if let Some(r) = unannounced {
+                let layout = if self
+                    .setup
+                    .remote(r)
+                    .is_some_and(|x| x.kind == RemoteKind::Agency)
+                {
+                    Layout::Full
+                } else {
+                    Layout::Split
+                };
+                let comp = self.composite_for(r, layout, None);
+                self.compose(comp, Reason::RemoteUnannounced { remote: r }, p, c, t, out);
+                return true;
+            }
+        }
+
+        // The floor given to a guest: cut to them when the host stops.
+        let addressed: Vec<SeatId> = self
+            .intents
+            .iter()
+            .filter(|i| i.hint.when == When::Now && i.hint.confidence >= 0.6)
+            .filter_map(|i| match i.hint.target {
+                Target::Seat(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        for s in addressed {
+            let on_air_kind = self
+                .on_air
+                .and_then(|o| self.setup.shot(o.shot))
+                .map(|x| x.kind.clone());
+            if on_air_kind == Some(ShotKind::Single(s)) || self.voice_since.contains_key(&s) {
+                self.drop_intent(Target::Seat(s));
+                continue;
+            }
+            if self.host_paused(t) && held >= self.profile.min_shot_ms * 6 / 10 {
+                let shot = self
+                    .setup
+                    .shots
+                    .iter()
+                    .find(|x| x.kind == ShotKind::Single(s) && self.usable(x, p, c))
+                    .cloned();
+                if let Some(shot) = shot {
+                    self.drop_intent(Target::Seat(s));
+                    self.cut(&shot, Reason::Addressed { seat: s }, t, out);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// With a remote source on air: follow the conversation. Returns
+    /// whether the remote part of the show is on (then the set's own
+    /// directing waits).
+    fn direct_remote(
+        &mut self,
+        p: &Perception,
+        c: &Control,
+        t: u64,
+        out: &mut Vec<Decision>,
+    ) -> bool {
+        let Some((comp, since, _)) = self.composite.clone() else {
+            return false;
+        };
+        let Some(r) = comp.remote() else {
+            self.composite = None;
+            return false;
+        };
+        let held = t.saturating_sub(since);
+        let kind = self.setup.remote(r).map(|x| x.kind);
+
+        if self
+            .remote_gone_since
+            .get(&r)
+            .is_some_and(|g| t.saturating_sub(*g) >= self.profile.remote_lost_ms)
+        {
+            self.leave_remote(Reason::RemoteLost { remote: r }, p, c, t, out);
+            return true;
+        }
+        let seat_spk = self.seat_speaking(t);
+        let remote_spk = self.remote_speaking(r, t);
+        if self
+            .intent(Target::Set)
+            .is_some_and(|h| h.confidence >= 0.5)
+        {
+            let quiet = !self.remote_voice_since.contains_key(&r);
+            if quiet
+                && (self.host_paused(t) || seat_spk.is_some())
+                && held >= self.profile.min_shot_ms / 2
+            {
+                self.drop_intent(Target::Set);
+                self.leave_remote(Reason::BackToSet, p, c, t, out);
+                return true;
+            }
+        }
+        // Another source announced, or a layout asked for this one.
+        let next = self
+            .intents
+            .iter()
+            .filter(|i| i.hint.when == When::Now && i.hint.confidence >= 0.6)
+            .find_map(|i| match i.hint.target {
+                Target::Remote(x) if p.remote(x).is_some_and(|s| s.online) => {
+                    Some((x, i.hint.layout))
+                }
+                _ => None,
+            });
+        if let Some((x, layout)) = next {
+            if self.host_paused(t) || self.remote_speaking(x, t).is_some() {
+                self.drop_intent(Target::Remote(x));
+                let wanted = self.composite_for(x, layout.unwrap_or(Layout::Split), None);
+                if wanted != comp {
+                    self.compose(wanted, Reason::GoRemote { remote: x }, p, c, t, out);
+                }
+                return true;
+            }
+        }
+        if held < self.profile.min_shot_ms {
+            return true;
+        }
+        let split_with = |s: SeatId| Composite::Split {
+            left: Subject::Seat(s),
+            right: Subject::Remote(r),
+        };
+        let agency = kind == Some(RemoteKind::Agency);
+        match comp {
+            Composite::Split { left, .. } => {
+                if let Some(d) = remote_spk {
+                    if d >= self.profile.remote_full_ms && seat_spk.is_none() {
+                        self.compose(
+                            Composite::Full { remote: r },
+                            Reason::RemoteSpeaks { remote: r },
+                            p,
+                            c,
+                            t,
+                            out,
+                        );
+                    }
+                } else if let Some((s, _)) = seat_spk {
+                    if left != Subject::Seat(s) {
+                        self.compose(split_with(s), Reason::Speaker { seat: s }, p, c, t, out);
+                    }
+                }
+            }
+            Composite::Full { .. } => {
+                if let Some((s, d)) = seat_spk {
+                    if !agency {
+                        self.compose(split_with(s), Reason::Speaker { seat: s }, p, c, t, out);
+                    } else if d >= 8000 {
+                        let pip = Composite::Pip {
+                            main: Subject::Remote(r),
+                            inset: Subject::Seat(s),
+                        };
+                        self.compose(pip, Reason::Speaker { seat: s }, p, c, t, out);
+                    }
+                } else if remote_spk.is_some() && held >= self.profile.max_shot_ms && !agency {
+                    let host = self.host().unwrap_or(SeatId(1));
+                    let pip = Composite::Pip {
+                        main: Subject::Remote(r),
+                        inset: Subject::Seat(host),
+                    };
+                    self.compose(pip, Reason::Listening { remote: r }, p, c, t, out);
+                }
+            }
+            Composite::Pip { .. } => {
+                if let Some((s, _)) = seat_spk {
+                    if !agency {
+                        self.compose(split_with(s), Reason::Speaker { seat: s }, p, c, t, out);
+                    }
+                } else if remote_spk.is_some() && held >= self.profile.max_shot_ms {
+                    self.compose(
+                        Composite::Full { remote: r },
+                        Reason::RemoteSpeaks { remote: r },
+                        p,
+                        c,
+                        t,
+                        out,
+                    );
+                }
+            }
+        }
+        true
+    }
+
+    /// How much the cues heard make a seat likely to be needed next.
+    fn cue_boost(&self, seat: SeatId) -> f32 {
+        let mut b: f32 = 0.0;
+        for i in &self.intents {
+            match i.hint.target {
+                Target::Seat(s) if s == seat => b = b.max(i.hint.confidence),
+                Target::Remote(_)
+                    if Some(seat) == self.host()
+                        && i.hint.layout != Some(Layout::Full)
+                        && i.hint.when != When::Later =>
+                {
+                    b = b.max(0.9 * i.hint.confidence)
+                }
+                _ => {}
+            }
+        }
+        b
     }
 
     /// Who has a voice, who speaks, together or not.
@@ -502,9 +1071,13 @@ impl Director {
     }
 
     fn is_on_air_camera(&self, cam: CamId) -> bool {
-        self.on_air
-            .and_then(|o| self.setup.shot(o.shot))
-            .is_some_and(|s| s.camera == cam)
+        self.composite
+            .as_ref()
+            .is_some_and(|(_, _, cams)| cams.contains(&cam))
+            || self
+                .on_air
+                .and_then(|o| self.setup.shot(o.shot))
+                .is_some_and(|s| s.camera == cam)
     }
 
     fn prepare(
@@ -595,8 +1168,8 @@ impl Director {
             .filter(|s| Some(*s) != on_air_single)
             .collect();
         ranked.sort_by(|a, b| {
-            let pa = p.next_probability(*a);
-            let pb = p.next_probability(*b);
+            let pa = p.next_probability(*a).max(self.cue_boost(*a));
+            let pb = p.next_probability(*b).max(self.cue_boost(*b));
             pb.partial_cmp(&pa)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| self.last_voice.get(b).cmp(&self.last_voice.get(a)))
@@ -742,6 +1315,8 @@ mod tests {
                     .collect(),
                 program: self.program,
                 next_speaker: vec![],
+                remotes: vec![],
+                hints: vec![],
             }
         }
 
@@ -993,5 +1568,307 @@ mod tests {
             run(&Script::demo(), 125, auto),
             run(&Script::demo(), 125, auto)
         );
+    }
+
+    /// Spoken cues and remote sources.
+    mod voice {
+        use super::*;
+        use crate::model::{Composite, RemoteId, Subject};
+        use crate::perception::RemoteState;
+        use crate::speech::{Heard, Listener};
+
+        struct Scene {
+            script: Script,
+            /// When the duplex speaks (ms).
+            duplex_voice: Vec<(u64, u64)>,
+            /// When the duplex is gone (ms).
+            duplex_off: Vec<(u64, u64)>,
+            /// (ms, seat, text) heard.
+            lines: Vec<(u64, u8, &'static str)>,
+        }
+
+        fn setup() -> StudioSetup {
+            let mut s = StudioSetup::example();
+            for (seat, n) in s
+                .seats
+                .iter_mut()
+                .zip(["Paul Martin", "Alice Durand", "Karim Benali"])
+            {
+                seat.guest = Some(n.into());
+            }
+            s.remotes[1].guest = Some("Julie Roux".into());
+            s
+        }
+
+        fn play(scene: &Scene, until_ms: u64) -> Vec<(u64, Decision)> {
+            let mut plateau = Plateau::new();
+            plateau.setup = setup();
+            let mut director = Director::new(plateau.setup.clone(), Profile::podcast());
+            let listener = Listener::new(&plateau.setup);
+            let within =
+                |spans: &Vec<(u64, u64)>, t: u64| spans.iter().any(|(a, b)| (*a..*b).contains(&t));
+            let mut in_composite: Vec<CamId> = Vec::new();
+            let mut log = Vec::new();
+            for t in (0..until_ms).step_by(40) {
+                let mut p = plateau.perceive(&scene.script, t);
+                let on = !within(&scene.duplex_off, t);
+                p.remotes = vec![
+                    RemoteState {
+                        remote: RemoteId(1),
+                        online: true,
+                        voice: false,
+                    },
+                    RemoteState {
+                        remote: RemoteId(2),
+                        online: on,
+                        voice: on && within(&scene.duplex_voice, t),
+                    },
+                ];
+                p.hints = scene
+                    .lines
+                    .iter()
+                    .filter(|(at, _, _)| *at >= t && *at < t + 40)
+                    .flat_map(|(at, seat, text)| {
+                        listener.hear(&Heard {
+                            t_ms: *at,
+                            seat: SeatId(*seat),
+                            text: (*text).into(),
+                            is_final: true,
+                        })
+                    })
+                    .collect();
+                for d in director.tick(&p, &Control::default()) {
+                    match &d {
+                        Decision::Compose { cameras, .. } => {
+                            plateau.program = None;
+                            in_composite = cameras.clone();
+                        }
+                        Decision::Cut { .. } => in_composite.clear(),
+                        Decision::Prepare { camera, .. } => {
+                            assert!(
+                                !in_composite.contains(camera),
+                                "a camera in the composite was moved at {t}"
+                            )
+                        }
+                        _ => {}
+                    }
+                    plateau.apply(&d, t);
+                    log.push((t, d));
+                }
+            }
+            log
+        }
+
+        fn composes(log: &[(u64, Decision)]) -> Vec<(u64, Composite, Reason)> {
+            log.iter()
+                .filter_map(|(t, d)| match d {
+                    Decision::Compose {
+                        program, reason, ..
+                    } => Some((*t, *program, reason.clone())),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn the_duplex() -> Scene {
+            Scene {
+                script: Script::default()
+                    .say(1, 2.0, 6.0)
+                    .say(1, 20.0, 23.0)
+                    .say(1, 30.0, 33.0),
+                duplex_voice: vec![(7000, 19000), (23500, 30000)],
+                duplex_off: vec![],
+                lines: vec![
+                    (
+                        5500,
+                        1,
+                        "On retrouve tout de suite Julie en duplex à Lyon, bonjour Julie !",
+                    ),
+                    (31500, 1, "Merci Julie, on revient en plateau."),
+                ],
+            }
+        }
+
+        const SPLIT: Composite = Composite::Split {
+            left: Subject::Seat(SeatId(1)),
+            right: Subject::Remote(RemoteId(2)),
+        };
+
+        #[test]
+        fn the_duplex_is_announced_then_followed() {
+            let log = play(&the_duplex(), 34000);
+            let c = composes(&log);
+            assert!(
+                log.iter().any(|(t, d)| *t < 6000
+                    && matches!(d, Decision::Preload { program, .. } if *program == SPLIT)),
+                "prepared while the host speaks"
+            );
+            let (t, comp, why) = &c[0];
+            assert!(
+                (6300..7000).contains(t),
+                "side by side at the end of the host's sentence, not at {t}"
+            );
+            assert_eq!(*comp, SPLIT);
+            assert_eq!(
+                *why,
+                Reason::GoRemote {
+                    remote: RemoteId(2)
+                }
+            );
+
+            let full = c
+                .iter()
+                .find(|(_, comp, _)| {
+                    *comp
+                        == Composite::Full {
+                            remote: RemoteId(2),
+                        }
+                })
+                .expect("Julie alone");
+            assert!(
+                (12900..13700).contains(&full.0),
+                "full frame after a long answer, not at {}",
+                full.0
+            );
+            let back = c
+                .iter()
+                .find(|(t, comp, _)| *t > 20000 && *comp == SPLIT)
+                .expect("side by side again when the host speaks");
+            assert!(back.0 < 21300, "{}", back.0);
+
+            let home = log
+                .iter()
+                .find_map(|(t, d)| match d {
+                    Decision::Cut {
+                        shot,
+                        reason: Reason::BackToSet,
+                        ..
+                    } => Some((*t, *shot)),
+                    _ => None,
+                })
+                .expect("back to the set");
+            assert!((31400..32200).contains(&home.0), "{}", home.0);
+            assert_eq!(
+                StudioSetup::example().shot(home.1).unwrap().kind,
+                ShotKind::Single(SeatId(1))
+            );
+        }
+
+        #[test]
+        fn later_is_only_noted() {
+            let scene = Scene {
+                lines: vec![(5500, 1, "Tout à l'heure, on retrouvera Julie en duplex.")],
+                duplex_voice: vec![],
+                ..the_duplex()
+            };
+            let log = play(&scene, 15000);
+            assert!(log
+                .iter()
+                .any(|(_, d)| matches!(d, Decision::Understood { .. })));
+            assert!(composes(&log).is_empty());
+            assert!(!log
+                .iter()
+                .any(|(_, d)| matches!(d, Decision::Preload { .. })));
+        }
+
+        #[test]
+        fn a_denied_duplex_does_nothing() {
+            let scene = Scene {
+                lines: vec![(5500, 1, "Pas de duplex aujourd'hui.")],
+                duplex_voice: vec![],
+                ..the_duplex()
+            };
+            let log = play(&scene, 15000);
+            assert!(!log
+                .iter()
+                .any(|(_, d)| matches!(d, Decision::Understood { .. } | Decision::Compose { .. })));
+        }
+
+        fn cut_to(log: &[(u64, Decision)], seat: u8) -> Option<(u64, Reason)> {
+            log.iter().find_map(|(t, d)| match d {
+                Decision::Cut { shot, reason, .. }
+                    if StudioSetup::example().shot(*shot).unwrap().kind
+                        == ShotKind::Single(SeatId(seat)) =>
+                {
+                    Some((*t, reason.clone()))
+                }
+                _ => None,
+            })
+        }
+
+        #[test]
+        fn a_guest_given_the_floor_is_shown_before_answering() {
+            let base = Scene {
+                script: Script::default().say(1, 2.0, 6.0).say(2, 7.0, 11.0),
+                duplex_voice: vec![],
+                duplex_off: vec![],
+                lines: vec![],
+            };
+            let without = cut_to(&play(&base, 12000), 2).expect("Alice shown");
+            let with = cut_to(
+                &play(
+                    &Scene {
+                        lines: vec![(5500, 1, "Alice, qu'en pensez-vous ?")],
+                        ..base
+                    },
+                    12000,
+                ),
+                2,
+            )
+            .expect("Alice shown");
+            assert_eq!(with.1, Reason::Addressed { seat: SeatId(2) });
+            assert!(
+                with.0 < 7000,
+                "on Alice before her first word, not at {}",
+                with.0
+            );
+            assert!(
+                without.0 >= 7700,
+                "without the cue, only once she speaks ({})",
+                without.0
+            );
+        }
+
+        #[test]
+        fn a_lost_duplex_goes_back_to_the_set() {
+            let scene = Scene {
+                duplex_off: vec![(9000, 30000)],
+                ..the_duplex()
+            };
+            let log = play(&scene, 14000);
+            let lost = log
+                .iter()
+                .find(|(_, d)| {
+                    matches!(
+                        d,
+                        Decision::Cut {
+                            reason: Reason::RemoteLost { .. },
+                            ..
+                        }
+                    )
+                })
+                .expect("back to the set");
+            assert!((10900..11500).contains(&lost.0), "{}", lost.0);
+        }
+
+        #[test]
+        fn an_unannounced_remote_is_shown_when_it_speaks() {
+            let scene = Scene {
+                script: Script::default().say(1, 2.0, 6.0),
+                duplex_voice: vec![(8000, 14000)],
+                duplex_off: vec![],
+                lines: vec![],
+            };
+            let c = composes(&play(&scene, 12000));
+            let (t, comp, why) = &c[0];
+            assert_eq!(
+                *why,
+                Reason::RemoteUnannounced {
+                    remote: RemoteId(2)
+                }
+            );
+            assert_eq!(*comp, SPLIT);
+            assert!((9300..10000).contains(t), "{t}");
+        }
     }
 }

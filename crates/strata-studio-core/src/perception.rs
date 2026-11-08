@@ -5,7 +5,8 @@
 //! part: `voice` is the seat's *own* voice, its neighbours' bleed removed,
 //! smoothed over the short gaps between words.
 
-use crate::model::{CamId, SeatId, ShotId};
+use crate::model::{CamId, RemoteId, SeatId, ShotId};
+use crate::speech::Hint;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -22,6 +23,22 @@ pub struct Perception {
     /// empty when there is none.
     #[serde(default)]
     pub next_speaker: Vec<(SeatId, f32)>,
+    /// The sources from outside the set.
+    #[serde(default)]
+    pub remotes: Vec<RemoteState>,
+    /// What the speech listener understood since the last frame.
+    #[serde(default)]
+    pub hints: Vec<Hint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteState {
+    pub remote: RemoteId,
+    /// Connected, with a picture (a call answered, a duplex received).
+    pub online: bool,
+    /// Someone speaks at the other end (its sound on the console).
+    pub voice: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -50,6 +67,10 @@ pub struct CamState {
 impl Perception {
     pub fn cam(&self, id: CamId) -> Option<&CamState> {
         self.cams.iter().find(|c| c.cam == id)
+    }
+
+    pub fn remote(&self, id: RemoteId) -> Option<&RemoteState> {
+        self.remotes.iter().find(|r| r.remote == id)
     }
 
     pub fn next_probability(&self, seat: SeatId) -> f32 {

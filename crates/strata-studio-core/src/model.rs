@@ -16,6 +16,77 @@ pub struct CamId(pub u8);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ShotId(pub u16);
 
+/// A source from outside the set: a call, a duplex, an agency feed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct RemoteId(pub u8);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteKind {
+    /// A guest calling in (Studiocall, Teams, Zoom through StudioEdge).
+    Call,
+    /// A reporter on location (Aviwest).
+    Duplex,
+    /// Pictures from a news agency.
+    Agency,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Remote {
+    pub id: RemoteId,
+    pub kind: RemoteKind,
+    /// As the tablet shows it ("Call 1", "Duplex").
+    pub label: String,
+    /// The person at the other end, when known ("Julie Martin").
+    #[serde(default)]
+    pub guest: Option<String>,
+    /// The switcher input it arrives on.
+    pub switcher_input: u16,
+}
+
+impl Remote {
+    pub fn display_name(&self) -> &str {
+        self.guest.as_deref().unwrap_or(&self.label)
+    }
+}
+
+/// Who a part of the picture shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type", content = "id")]
+pub enum Subject {
+    /// The person in this seat, on the camera framed on them.
+    Seat(SeatId),
+    Remote(RemoteId),
+}
+
+/// A program that is not one camera shot: built by the switcher (ATEM
+/// SuperSource, a vMix layout) or a remote source alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum Composite {
+    /// The remote source alone, full frame.
+    Full { remote: RemoteId },
+    /// Side by side, half and half.
+    Split { left: Subject, right: Subject },
+    /// `main` full frame, `inset` in a small box.
+    Pip { main: Subject, inset: Subject },
+}
+
+impl Composite {
+    pub fn remote(&self) -> Option<RemoteId> {
+        let r = |s: &Subject| match s {
+            Subject::Remote(r) => Some(*r),
+            Subject::Seat(_) => None,
+        };
+        match self {
+            Composite::Full { remote } => Some(*remote),
+            Composite::Split { left, right } => r(left).or(r(right)),
+            Composite::Pip { main, inset } => r(main).or(r(inset)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Seat {
@@ -114,9 +185,39 @@ pub struct StudioSetup {
     pub seats: Vec<Seat>,
     pub cameras: Vec<Camera>,
     pub shots: Vec<Shot>,
+    /// The sources from outside the set, for this show.
+    #[serde(default)]
+    pub remotes: Vec<Remote>,
+    /// The host's seat: the voice the speech cues are taken from (the
+    /// first seat when not set).
+    #[serde(default)]
+    pub host: Option<SeatId>,
 }
 
 impl StudioSetup {
+    pub fn remote(&self, id: RemoteId) -> Option<&Remote> {
+        self.remotes.iter().find(|r| r.id == id)
+    }
+
+    pub fn remote_name(&self, id: RemoteId) -> String {
+        self.remote(id).map_or_else(
+            || format!("Source {}", id.0),
+            |r| r.display_name().to_string(),
+        )
+    }
+
+    pub fn subject_name(&self, s: Subject) -> String {
+        match s {
+            Subject::Seat(id) => self.seat_name(id),
+            Subject::Remote(id) => self.remote_name(id),
+        }
+    }
+
+    /// The host's seat.
+    pub fn host_seat(&self) -> Option<SeatId> {
+        self.host.or_else(|| self.seats.first().map(|s| s.id))
+    }
+
     pub fn seat(&self, id: SeatId) -> Option<&Seat> {
         self.seats.iter().find(|s| s.id == id)
     }
@@ -182,6 +283,23 @@ impl StudioSetup {
             };
             if let Some(p) = people.iter().find(|p| !seats.contains(p)) {
                 return Err(format!("plan {} : place {} inconnue", s.id.0, p.0));
+            }
+        }
+        let mut remotes = BTreeSet::new();
+        for r in &self.remotes {
+            if !remotes.insert(r.id) {
+                return Err(format!("source extérieure {} déclarée deux fois", r.id.0));
+            }
+            if !inputs.insert(r.switcher_input) {
+                return Err(format!(
+                    "entrée {} du mélangeur prise deux fois",
+                    r.switcher_input
+                ));
+            }
+        }
+        if let Some(h) = self.host {
+            if !seats.contains(&h) {
+                return Err(format!("animateur à la place {} inconnue", h.0));
             }
         }
         Ok(())
@@ -250,6 +368,23 @@ impl StudioSetup {
             seats,
             cameras,
             shots,
+            remotes: vec![
+                Remote {
+                    id: RemoteId(1),
+                    kind: RemoteKind::Call,
+                    label: "Call 1".into(),
+                    guest: None,
+                    switcher_input: 5,
+                },
+                Remote {
+                    id: RemoteId(2),
+                    kind: RemoteKind::Duplex,
+                    label: "Duplex".into(),
+                    guest: None,
+                    switcher_input: 6,
+                },
+            ],
+            host: Some(SeatId(1)),
         }
     }
 }

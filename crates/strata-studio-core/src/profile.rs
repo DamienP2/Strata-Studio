@@ -24,6 +24,31 @@ pub struct Profile {
     /// After a cut, the switcher has this long to show it before a
     /// different program is taken as a person's hand.
     pub human_cut_grace_ms: u64,
+    /// The host has finished a sentence when silent this long.
+    #[serde(default = "d_phrase_end")]
+    pub phrase_end_ms: u64,
+    /// A remote speaking this long in a split goes full frame.
+    #[serde(default = "d_remote_full")]
+    pub remote_full_ms: u64,
+    /// A spoken cue not acted on within this time is forgotten.
+    #[serde(default = "d_cue_life")]
+    pub cue_life_ms: u64,
+    /// A remote gone for this long ends its part of the show.
+    #[serde(default = "d_remote_lost")]
+    pub remote_lost_ms: u64,
+}
+
+fn d_phrase_end() -> u64 {
+    350
+}
+fn d_remote_full() -> u64 {
+    6000
+}
+fn d_cue_life() -> u64 {
+    10000
+}
+fn d_remote_lost() -> u64 {
+    2000
 }
 
 impl Profile {
@@ -39,6 +64,10 @@ impl Profile {
             hysteresis: 0.15,
             variety_memory: 3,
             human_cut_grace_ms: 500,
+            phrase_end_ms: d_phrase_end(),
+            remote_full_ms: d_remote_full(),
+            cue_life_ms: d_cue_life(),
+            remote_lost_ms: d_remote_lost(),
         }
     }
 
