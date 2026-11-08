@@ -19,7 +19,7 @@
 | **Diffusion** | **Plateforme GO** (une parmi GO1 à GO4), **YouTube**, **TikTok** |
 | **Flux extérieurs** | **Call** (plusieurs à la fois), **agence de presse**, **duplex Aviwest** |
 | **Écran du studio** | un écran 16:9 sur le plateau : recommandations en vidéo, retour caméra pendant les tests, état du tournage |
-| **Tablette** | le contrôle, étape par étape (§ 3) |
+| **Contrôle** | une **tablette**, ou un **Stream Deck avec un écran** : le même parcours, étape par étape (§ 3) |
 
 ---
 
@@ -85,6 +85,18 @@ La tablette ne fait que du **contrôle**, sans identification. Elle avance **une
 | 12 | **Tests** | une personne (puis une source extérieure) après l'autre, image et son | l'**écran du studio** montre la bonne caméra, la zone 9:16 (ou le 9:16 seul), le vumètre et la consigne en surimpression |
 | 13 | **Récapitulatif** | relit, puis **lance l'enregistrement** (appui long) | dernières vérifications ; pendant le tournage, seulement la surveillance et **Terminer** (pas de pause, pas de touche toux) |
 | 14 | **Fin de tournage** | lit le récapitulatif | arrête l'enregistrement, copie vers le stockage, éteint les caméras et la lumière |
+
+### 3.1 Le même parcours sur un Stream Deck et un écran
+
+En plus de la tablette, le studio peut se piloter avec **un Stream Deck posé à côté d'un écran**. C'est le même parcours, les mêmes étapes, la même logique : seule la façon de répondre change.
+
+- **L'écran** affiche la question en cours, l'aide animée et le résumé des réponses : c'est la page de la tablette, en grand et sans toucher.
+- **Les touches du Stream Deck** portent les réponses de l'étape en cours, avec leur texte et leur icône : *1080p* / *4K*, *16:9* / *9:16*, *GO1* à *GO4* (grisées si déjà prises), *YouTube*, *TikTok*… Une touche allumée est une réponse choisie. Deux touches fixes : **Retour** et **Valider**.
+- **Les molettes** (Stream Deck +) règlent les nombres : personnes, Call simultanés.
+- **Pendant le tournage**, les touches deviennent des voyants : enregistrement, chaque diffusion, son, IA ou manuel, et **Terminer** (appui long).
+- **Ce qui s'écrit** (nom du programme, noms des personnes) se choisit dans des listes : programmes récents, annuaire des personnes déjà venues. Un nom nouveau se tape sur la tablette, ou sur un clavier branché au poste de l'écran.
+
+Le Stream Deck passe par **Bitfocus Buttons**, qui gère déjà les surfaces : Studio lui donne, à chaque étape, les touches à afficher (texte, icône, état) et reçoit les appuis. **Le parcours ne vit qu'à un seul endroit, dans Studio** : la tablette, l'écran et le Stream Deck en sont des vues, et peuvent servir en même temps (une réponse donnée sur l'un apparaît aussitôt sur les autres).
 
 ## 4. L'écran du studio
 
