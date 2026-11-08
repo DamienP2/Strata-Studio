@@ -1,13 +1,17 @@
 //! Perception: what Studio hears (and later sees) of the studio.
 //!
-//! For now, the host's ear: the host's microphone is cut into sentences
-//! ([`segment`]), each sentence is transcribed by a speech recogniser
-//! running on the server ([`whisper`]: a whisper.cpp server, local, no
-//! cloud), and the text becomes [`strata_studio_core::Heard`] for the
-//! [`strata_studio_core::Listener`] ([`ear`]).
+//! - The microphones, received in AES67 from the Dante network
+//!   ([`aes67`]), and who speaks on them, bleed taken out ([`voices`]).
+//! - The host's ear: the host's microphone is cut into sentences
+//!   ([`segment`]), each sentence is transcribed by a speech recogniser
+//!   running on the server ([`whisper`]: a whisper.cpp server, local, no
+//!   cloud), and the text becomes [`strata_studio_core::Heard`] for the
+//!   [`strata_studio_core::Listener`] ([`ear`]).
 
+pub mod aes67;
 pub mod ear;
 pub mod segment;
+pub mod voices;
 pub mod wav;
 pub mod whisper;
 

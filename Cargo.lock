@@ -601,6 +601,7 @@ dependencies = [
  "serde_json",
  "strata-studio-core",
  "strata-studio-devices",
+ "strata-studio-sense",
  "tokio",
  "tracing",
  "tracing-subscriber",

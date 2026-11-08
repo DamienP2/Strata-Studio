@@ -37,6 +37,10 @@ use strata_studio_devices::atem::{AtemLayout, AtemSwitcher};
 use strata_studio_devices::sim::{SimAutomation, SimConsole, SimPtz, SimSwitcher};
 use strata_studio_devices::vmix::{VmixLayout, VmixSwitcher};
 use strata_studio_devices::{AudioConsole, Automation, Ptz, Shown, Switcher};
+use strata_studio_sense::aes67;
+use strata_studio_sense::ear::HostEar;
+use strata_studio_sense::voices::{Settings as VoiceSettings, Voices};
+use strata_studio_sense::whisper::WhisperServer;
 
 #[derive(Parser)]
 #[command(
@@ -63,6 +67,94 @@ struct Args {
     /// vMix: the layout input with two layers for the picture in picture.
     #[arg(long, default_value_t = 21)]
     vmix_pip: u16,
+    /// The microphones: the SDP file of the AES67 stream (Dante) carrying
+    /// them (else the scripted conversation). Each seat's channel is its
+    /// `danteChannel`.
+    #[arg(long)]
+    aes67: Option<String>,
+    /// The network interface to receive the AES67 stream on.
+    #[arg(long, default_value = "0.0.0.0")]
+    aes67_if: String,
+    /// The whisper.cpp server transcribing the host's microphone.
+    #[arg(long)]
+    whisper: Option<String>,
+}
+
+/// The real microphones' voices, shared with the thread receiving them.
+type SharedVoices = Arc<Mutex<Voices>>;
+/// What the host's ear heard, shared with the thread transcribing.
+type EarOut = Arc<Mutex<Vec<Heard>>>;
+
+/// The microphones from the AES67 stream, and the host's ear on its channel.
+fn start_audio(
+    args: &Args,
+    host: SeatId,
+    host_channel: u16,
+) -> anyhow::Result<(Option<SharedVoices>, EarOut)> {
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let Some(path) = &args.aes67 else {
+        return Ok((None, heard));
+    };
+    let sdp = std::fs::read_to_string(path).with_context(|| format!("lecture de {path}"))?;
+    let stream = aes67::parse_sdp(&sdp)?;
+    let iface: std::net::Ipv4Addr = args.aes67_if.parse().context("--aes67-if")?;
+    let rx = aes67::receive(&stream, iface)?;
+    tracing::info!(
+        "micros : « {} », {} canaux, {}:{}",
+        stream.name,
+        stream.channels,
+        stream.group,
+        stream.port
+    );
+    let voices = Arc::new(Mutex::new(Voices::new(
+        stream.channels as usize,
+        stream.rate,
+        VoiceSettings::default(),
+    )));
+
+    let ear_tx = match &args.whisper {
+        Some(addr) => {
+            let addr: std::net::SocketAddr = addr.parse().context("--whisper")?;
+            let (tx, ear_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+            let out = heard.clone();
+            let rate = stream.rate;
+            std::thread::Builder::new()
+                .name("oreille".into())
+                .spawn(move || {
+                    let mut ear = HostEar::new(host, rate, WhisperServer::new(addr));
+                    for block in ear_rx {
+                        let got = ear.hear(&block);
+                        if !got.is_empty() {
+                            out.lock().unwrap().extend(got);
+                        }
+                    }
+                })?;
+            tracing::info!("oreille de l'animateur : whisper sur {addr}");
+            Some(tx)
+        }
+        None => None,
+    };
+    let v = voices.clone();
+    let channels = stream.channels as usize;
+    std::thread::Builder::new()
+        .name("micros".into())
+        .spawn(move || {
+            for block in rx {
+                v.lock().unwrap().feed(&block);
+                if let Some(tx) = &ear_tx {
+                    let host: Vec<f32> = block
+                        .iter()
+                        .skip(host_channel as usize)
+                        .step_by(channels)
+                        .copied()
+                        .collect();
+                    if tx.send(host).is_err() {
+                        break;
+                    }
+                }
+            }
+        })?;
+    Ok((Some(voices), heard))
 }
 
 /// The switcher: a real one when its address is given, else the simulated one.
@@ -121,6 +213,10 @@ struct App {
     /// Slow movements under way: when to stop them.
     zoom_until: BTreeMap<CamId, u64>,
     drive_until: BTreeMap<CamId, u64>,
+    /// The real microphones, when an AES67 stream is received.
+    voices: Option<Arc<Mutex<Voices>>>,
+    /// What the host's ear heard, not yet listened to.
+    ear_out: Arc<Mutex<Vec<Heard>>>,
 }
 
 type Shared = Arc<Mutex<App>>;
@@ -144,6 +240,8 @@ impl App {
             remote_voice: BTreeMap::new(),
             zoom_until: BTreeMap::new(),
             drive_until: BTreeMap::new(),
+            voices: None,
+            ear_out: Arc::new(Mutex::new(Vec::new())),
             director: Director::new(setup, profile),
             control: Control::default(),
             switcher,
@@ -286,7 +384,13 @@ impl App {
             .program()
             .and_then(|i| setup.camera_on_input(i))
             .map(|c| c.id);
-        let mics = self.script.mics(setup.seats.iter().map(|s| s.id), t);
+        let mics = match &self.voices {
+            Some(v) => v
+                .lock()
+                .unwrap()
+                .mics(setup.seats.iter().map(|s| (s.id, s.mic.dante_channel))),
+            None => self.script.mics(setup.seats.iter().map(|s| s.id), t),
+        };
         let remotes = setup
             .remotes
             .iter()
@@ -309,6 +413,14 @@ impl App {
 
     fn tick(&mut self) {
         let now = self.now();
+        let heard: Vec<Heard> = std::mem::take(&mut *self.ear_out.lock().unwrap());
+        for h in heard {
+            let hints = self.listener.hear(&h);
+            if hints.is_empty() {
+                self.log(format!("entendu : « {} »", h.text), true);
+            }
+            self.heard.extend(hints);
+        }
         for (cam, until) in self.zoom_until.clone() {
             if now >= until {
                 self.zoom_until.remove(&cam);
@@ -711,6 +823,15 @@ async fn main() -> anyhow::Result<()> {
     let sw = switcher(&args)?;
     tracing::info!("mélangeur : {}", sw.name());
     let app: Shared = Arc::new(Mutex::new(App::new(profile, sw)));
+    {
+        let mut a = app.lock().unwrap();
+        let setup = a.director.setup().clone();
+        let host = setup.host_seat().unwrap_or(SeatId(1));
+        let host_channel = setup.seat(host).map_or(0, |s| s.mic.dante_channel);
+        let (voices, heard) = start_audio(&args, host, host_channel)?;
+        a.voices = voices;
+        a.ear_out = heard;
+    }
     {
         let mut a = app.lock().unwrap();
         let names = [
