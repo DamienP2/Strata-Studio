@@ -284,11 +284,11 @@ input[type=range] { accent-color: var(--accent); width: 100%; }
 .scr .tip { background: #121a2e; border-radius: 2.4vh; padding: 2.6vh; display: flex; flex-direction: column; gap: 1.2vh; }
 .scr .tip b { font-size: 3vh; }
 .scr .tip span { font-size: 2.3vh; color: var(--mist); line-height: 1.35; }
-.scr .cam { flex: 1; position: relative; border-radius: 2vh; overflow: hidden; background: #000; }
-.scr .cam img { width: 100%; height: 100%; object-fit: cover; }
-.scr .cam .say { position: absolute; left: 0; right: 0; bottom: 0; padding: 2.4vh 3vh; background: rgba(13,20,36,.85); font-size: 4.2vh; font-weight: 800; display: flex; align-items: center; gap: 2vh; }
-.scr .cam .meter { position: absolute; right: 2.4vh; top: 2.4vh; bottom: 14vh; width: 2.4vh; display: flex; flex-direction: column-reverse; gap: .4vh; }
-.scr .cam .meter i { flex: 1; border-radius: .3vh; background: rgba(255,255,255,.14); }
+.scr .scam { flex: 1; position: relative; border-radius: 2vh; overflow: hidden; background: #000; }
+.scr .scam img { width: 100%; height: 100%; object-fit: cover; }
+.scr .scam .say { position: absolute; left: 0; right: 0; bottom: 0; padding: 2.4vh 3vh; background: rgba(13,20,36,.85); font-size: 4.2vh; font-weight: 800; display: flex; align-items: center; gap: 2vh; }
+.scr .scam .meter { position: absolute; right: 2.4vh; top: 2.4vh; bottom: 14vh; width: 2.4vh; display: flex; flex-direction: column-reverse; gap: .4vh; }
+.scr .scam .meter i { flex: 1; border-radius: .3vh; background: rgba(255,255,255,.14); }
 .scr .onair { align-self: flex-start; padding: 1.6vh 3vh; border-radius: 1.6vh; background: var(--live); font-size: 5vh; font-weight: 900; letter-spacing: .1em; }
 .scr .clock { font-family: var(--display); font-size: 22vh; font-weight: 800; letter-spacing: -.04em; font-variant-numeric: tabular-nums; line-height: 1; }
 

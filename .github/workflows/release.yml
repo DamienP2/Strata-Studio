@@ -33,12 +33,15 @@ jobs:
         run: cargo test --workspace --locked
       - name: Paquet
         run: packaging/build-deb.sh "$V"
-      - name: Le paquet s'installe et le service démarre
+      - name: L'installateur installe Studio, le service démarre, les pages répondent
         run: |
-          sudo apt-get install -y ./dist/strata-studio_*_amd64.deb
+          sudo bash dist/install.sh --yes --deb "$(ls dist/strata-studio_*_amd64.deb)"
           for i in $(seq 1 30); do curl -sf localhost:8095/api/health && break; sleep 1; done
           systemctl is-active strata-studio
           curl -sf localhost:8095/api/health
+          curl -sf localhost:8095/ | grep -q "Strata Studio"
+          curl -sf localhost:8095/api/snapshot | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["step"] == 1, d'
+          sudo test -f /var/lib/strata-studio/reglages.json
       - uses: actions/upload-artifact@v4
         with:
           name: strata-studio-ubuntu

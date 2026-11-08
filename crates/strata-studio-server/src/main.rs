@@ -413,6 +413,8 @@ struct App {
     deck_tx: Option<std::sync::mpsc::Sender<Vec<(String, String)>>>,
     deck_last: deck::DeckView,
     disks: shoot::Disks,
+    /// Devices that did not answer at start: (check's label, error).
+    device_errors: Vec<(String, String)>,
 }
 
 type Shared = Arc<Mutex<App>>;
@@ -458,6 +460,7 @@ impl App {
             deck_tx: None,
             deck_last: deck::DeckView::default(),
             disks: shoot::Disks::default(),
+            device_errors: Vec::new(),
             listener: Listener::new(&setup),
             heard: Vec::new(),
             remote_voice: BTreeMap::new(),
@@ -1143,11 +1146,36 @@ async fn main() -> anyhow::Result<()> {
         .cloned()
         .or_else(|| Profile::all().into_iter().nth(args.profile))
         .context("profil inconnu")?;
-    let sw = switcher(&settings)?;
+    // A device that does not answer does not stop Studio: it is
+    // simulated, and the studio check says so.
+    let mut device_errors: Vec<(String, String)> = Vec::new();
+    let mut fallback = |label: &str, e: anyhow::Error| {
+        tracing::error!("{label} : {e:#} (simulé en attendant)");
+        device_errors.push((label.to_string(), format!("{e:#}")));
+    };
+    let sw = switcher(&settings).unwrap_or_else(|e| {
+        fallback("Mélangeur", e);
+        Box::new(SimSwitcher::new())
+    });
     tracing::info!("mélangeur : {}", sw.name());
-    let console = console(&settings)?;
-    let buttons = automation(&settings)?;
-    let router_dev = nodal(&settings)?;
+    let console = console(&settings).unwrap_or_else(|e| {
+        fallback("Console", e);
+        Box::new(SimConsole::default())
+    });
+    let buttons = automation(&settings).unwrap_or_else(|e| {
+        fallback("Lumière", e);
+        Box::new(SimAutomation::default())
+    });
+    let router_dev = nodal(&settings).unwrap_or_else(|e| {
+        fallback("Nodal", e);
+        Box::new(SimRouter::default())
+    });
+    let ptz = cameras(&settings).unwrap_or_else(|e| {
+        fallback("Caméras", e);
+        let mut sim = settings.clone();
+        sim.cameras.control = "sim".into();
+        cameras(&sim).unwrap_or_default()
+    });
     tracing::info!(
         "console : {} · automations : {} · nodal : {}",
         console.name(),
@@ -1158,12 +1186,12 @@ async fn main() -> anyhow::Result<()> {
         switcher: sw,
         console,
         automation: buttons,
-        ptz: cameras(&settings)?,
+        ptz,
         router: router_dev,
     };
     let ext: shoot::SharedExt = Arc::new(Mutex::new(externals(&settings)));
     let deck_tx = if settings.buttons.deck && !settings.buttons.address.is_empty() {
-        Some(shoot::deck_pusher(automation(&settings)?))
+        automation(&settings).ok().map(shoot::deck_pusher)
     } else {
         None
     };
@@ -1172,13 +1200,21 @@ async fn main() -> anyhow::Result<()> {
     {
         let mut a = app.lock().unwrap();
         a.deck_tx = deck_tx;
+        a.device_errors = device_errors;
         a.ffmpeg = args.ffmpeg.clone();
         let setup = a.director.setup().clone();
         let host = setup.host_seat().unwrap_or(SeatId(1));
         let host_channel = setup.seat(host).map_or(0, |s| s.mic.dante_channel);
         let mic_sink: record::MicSink = Arc::new(Mutex::new(None));
         let (voices, heard, stream) =
-            start_audio(&a.settings.audio, host, host_channel, mic_sink.clone())?;
+            match start_audio(&a.settings.audio, host, host_channel, mic_sink.clone()) {
+                Ok(x) => x,
+                Err(e) => {
+                    tracing::error!("micros : {e:#} (conversation simulée en attendant)");
+                    a.device_errors.push(("Micros".into(), format!("{e:#}")));
+                    (None, Arc::new(Mutex::new(Vec::new())), None)
+                }
+            };
         a.voices = voices;
         a.ear_out = heard;
         let rec_settings = a.settings.recording.clone();

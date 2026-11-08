@@ -396,6 +396,7 @@ async fn system(State(app): State<Shared>) -> Json<serde_json::Value> {
         },
         "ndi": strata_studio_devices::ndi::LIBRARIES.iter().any(|l| unsafe { libloading::Library::new(l) }.is_ok()),
         "simulated": a.simulated,
+        "deviceErrors": a.device_errors,
     }))
 }
 

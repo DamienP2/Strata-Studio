@@ -11,8 +11,9 @@ Group=strata-studio
 EnvironmentFile=/etc/strata-studio/strata-studio.env
 WorkingDirectory=/var/lib/strata-studio
 ExecStart=/usr/bin/strata-studio $STRATA_STUDIO_ARGS
-Restart=on-failure
-RestartSec=3
+# Toujours relancé, y compris après « Redémarrer » dans l'administration.
+Restart=always
+RestartSec=2
 # Studio ferme lui-même les fichiers d'un tournage en cours avant de s'arrêter.
 KillMode=mixed
 TimeoutStopSec=30

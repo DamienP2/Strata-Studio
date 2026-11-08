@@ -1158,7 +1158,13 @@ fn run_checks(app: &Shared, ext: &SharedExt) {
     let mut a = app.lock().unwrap();
     a.ext.gos = gos.iter().map(|(_, s)| s.clone()).collect();
     let mut checks = Vec::new();
-    checks.push(Check::ok("Lumière", "scène par défaut"));
+    // Buttons drives the lights: it must answer.
+    checks.push(
+        match a.automation.set_variable("studio_state", "vérification") {
+            Ok(()) => Check::ok("Lumière", "scène par défaut"),
+            Err(e) => Check::warn("Lumière", format!("Buttons ne répond pas : {e}")),
+        },
+    );
     let cams: Vec<bool> = a.ptz.values_mut().map(|p| p.status().online).collect();
     let on = cams.iter().filter(|o| **o).count();
     checks.push(if on == cams.len() {
@@ -1203,6 +1209,20 @@ fn run_checks(app: &Shared, ext: &SharedExt) {
         Some(b) => Check::ok("Stockage", format!("{} libres sur le serveur", bytes(b))),
         None => Check::warn("Stockage", "place sur le serveur inconnue"),
     });
+    // A device simulated because it did not answer at start.
+    for (label, error) in a.device_errors.clone() {
+        // Without a switcher there is no shoot; the rest is shot without.
+        let detail = format!("ne répond pas : {error}");
+        let c = if label == "Mélangeur" {
+            Check::fail(&label, detail)
+        } else {
+            Check::warn(&label, detail)
+        };
+        match checks.iter_mut().find(|k| k.label == label) {
+            Some(k) => *k = c,
+            None => checks.push(c),
+        }
+    }
     a.session.checks = checks;
     a.session.checks_at = Some(Instant::now());
 }

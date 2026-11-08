@@ -609,7 +609,7 @@ function Screen() {
     const remote = t.seat == null;
     const heard = remote ? (s.testMs || 0) > 1200 : s.hearing.heard;
     const say = !remote && s.hearing.low ? 'Plus près du micro, s’il vous plaît.' : heard ? 'Merci, c’est bien reçu.' : remote ? 'Quelques mots, s’il vous plaît.' : `${first(t.label)}, dites votre nom et votre fonction.`;
-    body = html`<div class="cam"><img src=${'/api/preview/' + t.source} alt="" />
+    body = html`<div class="scam"><img src=${'/api/preview/' + t.source} alt="" />
       ${s.draft.vertical ? html`<span class=${'side' + (s.screen === 'only' ? ' only' : '')} style="position:absolute;left:0;top:0;bottom:0;width:34.2%;background:rgba(0,0,0,.55)"></span><span style="position:absolute;right:0;top:0;bottom:0;width:34.2%;background:rgba(0,0,0,.55)"></span><span style="position:absolute;left:34.2%;top:0;bottom:0;width:31.6%;border:.4vh dashed #ffd27a"></span>` : null}
       <div class="meter"><${Meter} level=${s.hearing.level} n=${20} /></div>
       <div class="say"><span class="pulse" style=${{ width: '2vh', height: '2vh', borderRadius: '50%', background: s.hearing.low ? '#ffc46b' : heard ? '#4ade80' : '#b9c6ff' }}></span>${say}</div></div>`;
@@ -907,7 +907,7 @@ function Directing() {
       <div style="flex:1 1 480px;display:flex;flex-direction:column;gap:14px">
         <div class="box"><h2>Rejouer un tournage avec ce réglage</h2>
           <span class="w-sub">L’IA rejoue ce que Studio a entendu et vu pendant le tournage, sans rien envoyer aux appareils. Mêmes entrées : seul le réglage change.</span>
-          <div class="row"><select class="winput" style="flex:1" value=${shootId} onChange=${(e) => setShootId(e.target.value)}>${(shoots || []).map((r) => html`<option value=${r.id}>${r.programme} · ${dateFr(r.startedUnixMs)}</option>`)}</select>
+          <div class="row"><select class="winput" style="flex:1" aria-label="Tournage à rejouer" value=${shootId || (shoots && shoots[0] ? shoots[0].id : '')} onChange=${(e) => setShootId(e.target.value)}>${(shoots || []).map((r) => html`<option value=${r.id}>${r.programme} · ${dateFr(r.startedUnixMs)}</option>`)}</select>
             <button type="button" class="wbtn pri" disabled=${busy} onClick=${replay}>${busy ? 'Calcul…' : 'Rejouer'}</button></div>
           ${rep ? html`<span class="w-sub">Réglage du tournage</span><${Strip} segments=${rep.current.segments} duration=${rep.durationMs} />
             <span class="w-sub">Ce réglage</span><${Strip} segments=${rep.proposed.segments} duration=${rep.durationMs} />
@@ -945,7 +945,8 @@ function System() {
       <div class="row">${restart ? html`<button type="button" class="wbtn" onClick=${reboot}>Redémarrer Studio</button>` : null}<button type="button" class="wbtn pri" onClick=${save}>Enregistrer</button></div></div>
     ${sys ? html`<div class="box"><h2>Le serveur</h2><div class="fields w-sub" style="font-size:13px">
       <span>Version ${sys.version} · en marche depuis ${fmt(sys.uptimeS)}</span><span>Réglages : <span class="mono">${sys.settingsFile}</span></span><span>${sys.ffmpeg || 'ffmpeg introuvable'}</span><span>NDI : ${sys.ndi ? 'runtime installé' : 'non installé'}</span>
-      <span>Mélangeur : ${sys.devices.switcher} ${sys.devices.switcherConnected ? '· connecté' : '· non connecté'}</span><span>Console : ${sys.devices.console}</span><span>Buttons : ${sys.devices.automation}</span><span>Nodal : ${sys.devices.router}</span><span>Micros : ${sys.devices.microphones}</span>${sys.simulated ? html`<span class="tag warn">studio simulé</span>` : null}</div></div>` : null}
+      <span>Mélangeur : ${sys.devices.switcher} ${sys.devices.switcherConnected ? '· connecté' : '· non connecté'}</span><span>Console : ${sys.devices.console}</span><span>Buttons : ${sys.devices.automation}</span><span>Nodal : ${sys.devices.router}</span><span>Micros : ${sys.devices.microphones}</span>${sys.simulated ? html`<span class="tag warn">studio simulé</span>` : null}</div>
+      ${sys.deviceErrors && sys.deviceErrors.length ? html`<div class="stack" style="display:flex;flex-direction:column;gap:6px">${sys.deviceErrors.map(([l, e]) => html`<span><span class="tag live">${l}</span> <span class="w-sub">ne répondait pas au démarrage, simulé en attendant : ${e}</span></span>`)}</div>` : null}</div>` : null}
     <div class="box"><h2>Studio</h2><div class="fields">${F('studio', 'Nom du studio')}</div></div>
     <div class="box"><h2>Mélangeur et console</h2><div class="fields">
       ${F('switcher.kind', 'Mélangeur', { choices: [['sim', 'simulé'], ['atem', 'ATEM'], ['vmix', 'vMix']] })}${F('switcher.address', 'Adresse', { ph: '192.168.10.2' })}${F('switcher.vmixSplit', 'vMix : entrée 50/50', { num: 1 })}${F('switcher.vmixPip', 'vMix : entrée vignette', { num: 1 })}

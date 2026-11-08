@@ -47,5 +47,6 @@ dpkg-deb --root-owner-group -Zxz --build "$ROOT" "dist/${NAME}.deb"
 # La configuration reste lisible par le service seul.
 tar -C "$ROOT" -czf "dist/strata-studio-${VERSION}-linux-${ARCH}.tar.gz" \
     usr/bin usr/lib/systemd/system etc/strata-studio
-(cd dist && sha256sum "${NAME}.deb" "strata-studio-${VERSION}-linux-${ARCH}.tar.gz" > SHA256SUMS)
+install -m 0755 packaging/install.sh dist/install.sh
+(cd dist && sha256sum "${NAME}.deb" "strata-studio-${VERSION}-linux-${ARCH}.tar.gz" install.sh > SHA256SUMS)
 echo "dist/${NAME}.deb"
