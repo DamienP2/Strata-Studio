@@ -137,7 +137,13 @@ Studio reçoit une **copie AES67** des micros depuis le réseau Dante (le flux e
 - **ATEM** (tous les modèles, UDP 9910) : coupe par l'entrée programme ; le 50/50 et la vignette sont des mises en page de la **SuperSource**, dont Studio règle les cases (source, position, taille) avant de la prendre ; Studio lit l'entrée programme pour voir une coupe faite au pupitre. La géométrie des cases est un réglage ; le format des commandes SuperSource est celui des ATEM récents et **reste à valider sur l'ATEM du studio**.
 - **vMix** (TCP 8099) : coupe directe ; le 50/50 et la vignette sont **deux entrées de mise en page à deux couches** préparées dans vMix, dont Studio remplit les couches avant de les prendre ; le tally abonné donne le programme.
 
-### 2.9 Ce qui est piloté par Buttons
+### 2.9 Le nodal, la console, Buttons
+
+- **Videohub** (TCP 9990) : Studio lit les noms des entrées et des sorties et route **par nom** (« PGM ATEM » → « GO 3 ») ; il voit les routes changées à la main.
+- **Midas M32** (OSC, UDP 10023) et **Yamaha DM5** (RCP, TCP 49280) : ouverture et coupure des micros, nom des invités sur les tranches, rappel de scène (DM5). Les noms des paramètres Yamaha sont ceux des DM7, CL et QL, **à valider sur le DM5**.
+- **Bitfocus Buttons** (HTTP) : appui sur un bouton (page, ligne, colonne) et variables ; ce sont les routes de l'API HTTP de Bitfocus Companion, **à valider sur Buttons**.
+
+### 2.10 Ce qui est piloté par Buttons
 
 L'**allumage** au début et l'**extinction** à la fin (lumière par défaut, caméras) passent par Bitfocus Buttons, comme le reste des automations ; la mise sous tension des caméras peut aussi se faire en VISCA. Le **Stream Deck** passe aussi par Buttons (§ 3.2).
 

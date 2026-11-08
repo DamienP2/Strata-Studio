@@ -37,8 +37,11 @@ use strata_studio_core::{
     Perception, Profile, RemoteId, RemoteState, SeatId, ShotId, ShotKind, StudioSetup, Subject,
 };
 use strata_studio_devices::atem::{AtemLayout, AtemSwitcher};
+use strata_studio_devices::buttons::Buttons;
+use strata_studio_devices::m32::M32;
 use strata_studio_devices::sim::{SimAutomation, SimConsole, SimPtz, SimSwitcher};
 use strata_studio_devices::vmix::{VmixLayout, VmixSwitcher};
+use strata_studio_devices::yamaha::Yamaha;
 use strata_studio_devices::{AudioConsole, Automation, Ptz, Shown, Switcher};
 use strata_studio_sense::aes67;
 use strata_studio_sense::ear::HostEar;
@@ -91,6 +94,49 @@ struct Args {
     /// The ffmpeg to record with.
     #[arg(long, default_value = "ffmpeg")]
     ffmpeg: String,
+    /// The audio console: `m32:<address>` or `dm5:<address>` (else simulated).
+    #[arg(long)]
+    console: Option<String>,
+    /// Bitfocus Buttons' HTTP API: `<address>:<port>` (else simulated).
+    #[arg(long)]
+    buttons: Option<String>,
+}
+
+fn with_port(a: &str, port: u16) -> anyhow::Result<std::net::SocketAddr> {
+    let a = if a.contains(':') {
+        a.to_string()
+    } else {
+        format!("{a}:{port}")
+    };
+    a.parse().with_context(|| format!("adresse : {a}"))
+}
+
+fn console(args: &Args) -> anyhow::Result<Box<dyn AudioConsole>> {
+    Ok(
+        match args
+            .console
+            .as_deref()
+            .map(|c| c.split_once(':').unwrap_or((c, "")))
+        {
+            None => Box::new(SimConsole::default()),
+            Some(("m32", a)) => Box::new(M32::connect(with_port(
+                a,
+                strata_studio_devices::m32::PORT,
+            )?)?),
+            Some(("dm5", a)) | Some(("yamaha", a)) => Box::new(Yamaha::connect(with_port(
+                a,
+                strata_studio_devices::yamaha::PORT,
+            )?)?),
+            Some((k, _)) => anyhow::bail!("console inconnue : {k} (m32 ou dm5)"),
+        },
+    )
+}
+
+fn automation(args: &Args) -> anyhow::Result<Box<dyn Automation>> {
+    Ok(match &args.buttons {
+        None => Box::new(SimAutomation::default()),
+        Some(a) => Box::new(Buttons::new(with_port(a, 8000)?)),
+    })
 }
 
 /// What the audio start gives: the voices, the ear's output, the
@@ -225,8 +271,8 @@ struct App {
     control: Control,
     switcher: Box<dyn Switcher>,
     ptz: BTreeMap<CamId, SimPtz>,
-    console: SimConsole,
-    automation: SimAutomation,
+    console: Box<dyn AudioConsole>,
+    automation: Box<dyn Automation>,
     script: Script,
     start: Instant,
     last: Perception,
@@ -248,7 +294,12 @@ struct App {
 type Shared = Arc<Mutex<App>>;
 
 impl App {
-    fn new(profile: Profile, switcher: Box<dyn Switcher>) -> Self {
+    fn new(
+        profile: Profile,
+        switcher: Box<dyn Switcher>,
+        console: Box<dyn AudioConsole>,
+        automation: Box<dyn Automation>,
+    ) -> Self {
         let setup = StudioSetup::example();
         let first = [(1, 1), (2, 1), (3, 2), (4, 3)];
         let ptz = first
@@ -273,8 +324,8 @@ impl App {
             control: Control::default(),
             switcher,
             ptz,
-            console: SimConsole::default(),
-            automation: SimAutomation::default(),
+            console,
+            automation,
             script: Script::demo(),
             start: Instant::now(),
             last: Perception::default(),
@@ -921,7 +972,14 @@ async fn main() -> anyhow::Result<()> {
         .context("profil inconnu (0 à 3)")?;
     let sw = switcher(&args)?;
     tracing::info!("mélangeur : {}", sw.name());
-    let app: Shared = Arc::new(Mutex::new(App::new(profile, sw)));
+    let console = console(&args)?;
+    let automation = automation(&args)?;
+    tracing::info!(
+        "console : {} · automations : {}",
+        console.name(),
+        automation.name()
+    );
+    let app: Shared = Arc::new(Mutex::new(App::new(profile, sw, console, automation)));
     {
         let mut a = app.lock().unwrap();
         let setup = a.director.setup().clone();

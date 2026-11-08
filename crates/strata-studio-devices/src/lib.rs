@@ -4,16 +4,19 @@
 //! | Interface | Devices (planned) |
 //! | --- | --- |
 //! | [`Switcher`] | Blackmagic ATEM, all models (UDP 9910, [`atem`]), vMix (TCP 8099, [`vmix`]) |
-//! | [`Router`] | Videohub (TCP 9990), NMOS IS-05 without a registry (ST 2110), NDI routing done by Studio |
+//! | [`Router`] | Videohub (TCP 9990, [`videohub`]); NMOS IS-05 without a registry (ST 2110) and NDI routing to come |
 //! | [`Ptz`] | Sony FR7, BRC-AM7 (VISCA over IP, [`visca`]) |
-//! | [`AudioConsole`] | Midas M32 (OSC, [`m32`]), Yamaha DM5 (RCP) |
-//! | [`Automation`] | Bitfocus Buttons: lights (DMX), ON AIR, the rest |
+//! | [`AudioConsole`] | Midas M32 (OSC, [`m32`]), Yamaha DM5 (RCP, [`yamaha`]) |
+//! | [`Automation`] | Bitfocus Buttons (HTTP, [`buttons`]): lights (DMX), ON AIR, the rest |
 
 pub mod atem;
+pub mod buttons;
 pub mod m32;
 pub mod sim;
+pub mod videohub;
 pub mod visca;
 pub mod vmix;
+pub mod yamaha;
 
 use thiserror::Error;
 
