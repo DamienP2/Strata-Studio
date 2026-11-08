@@ -55,9 +55,9 @@ Jusqu'ici Studio ne faisait que piloter. **L'enregistrement et une partie de la 
 ```
 
 - **Entrée des images** : SDI (DeckLink), NDI et ST 2110 ; chaque source se déclare dans son format.
-- **PGM et CLEAN** : deux sorties du mélangeur arrivent au serveur. Sur un ATEM, le PGM sort sur sa sortie programme et le CLEAN sur une sortie auxiliaire réglée en *clean feed* (le programme sans les incrustations). Sur vMix, deux sorties (SDI ou NDI) : le programme, et le programme sans les overlays.
+- **PGM et CLEAN** : deux sorties du mélangeur arrivent au serveur. Sur un ATEM, le PGM sort sur sa sortie programme et le CLEAN sur une sortie auxiliaire réglée en *clean feed* (le programme sans les incrustations). Sur vMix, deux sorties (SDI ou NDI) : le programme, et le programme sans les overlays. **Quelle sortie porte quoi se règle dans les paramètres, côté administration**, pour l'ATEM comme pour vMix.
 - **Encodage** : 6 canaux 4:2:2 en temps réel, plus YouTube et TikTok. En 2160p50, c'est lourd. Les cartes NVIDIA de génération Blackwell encodent le H.264 et le H.265 en 4:2:2 en matériel ; la même carte sert l'IA. **Le nombre de canaux tenus en 2160p50 sera mesuré sur la machine retenue**, c'est le premier risque du projet.
-- **Plateforme GO** : chaque GO est un **encodeur Blackmagic Web Encoder 4K**. Studio lit par son API s'il diffuse déjà : un GO en service est **grisé** sur la tablette. Pour le GO choisi, Studio route le PGM vers son entrée par le Videohub et, si l'API le permet, lance et arrête sa diffusion.
+- **Plateforme GO** : chaque GO est un **encodeur Blackmagic Web Encoder 4K**. Studio lit par son API s'il diffuse déjà : un GO en service est **grisé** sur la tablette. Pour le GO choisi, Studio route le PGM vers son entrée par le Videohub, puis **lance la diffusion au lancement du tournage et l'arrête à la fin**, par la même API.
 - **YouTube et TikTok** : encodés par le serveur ; TikTok reçoit le PGM découpé en 9:16, en direct.
 - **Stockage** : l'enregistrement se fait sur les disques du serveur, puis Studio **copie** vers le partage SMB choisi, rangé par programme et par date.
 - **Base existante** : Strata Graphics sait déjà recevoir (SDI DeckLink, NDI, SRT), encoder et diffuser (SRT, RTMP, HLS par ffmpeg, encodage matériel).
@@ -70,7 +70,7 @@ Jusqu'ici Studio ne faisait que piloter. **L'enregistrement et une partie de la 
 
 ### 2.4 Les flux extérieurs
 
-- **Call** : Quicklink StudioEdge reçoit les appels **Studiocall, Teams ou Zoom** et les sort vers le mélangeur. Studio prépare autant d'entrées que d'appels simultanés choisis ; son pilotage par l'API de StudioEdge est à vérifier, à défaut par Buttons.
+- **Call** : Quicklink StudioEdge reçoit les appels **Studiocall, Teams ou Zoom** et les sort vers le mélangeur. Studio prépare autant d'entrées que d'appels simultanés choisis. Pour le pilotage des appels, la référence est la documentation StudioCall Live de Quicklink (support.quicklink.tv, catégorie « QuickLink StudioCall Live ») : Studio passe par son interface de contrôle si elle couvre le besoin, sinon par Buttons. Ce point reste à confirmer, la documentation n'ayant pas encore pu être lue (accès protégé).
 - **Agence de presse** et **duplex Aviwest** : une entrée du mélangeur chacun, testée comme une personne (image et son) à l'étape 12.
 
 ### 2.5 Ce qui est piloté par Buttons
@@ -139,6 +139,4 @@ Un écran 16:9 sur le plateau, piloté par Studio :
 
 ## 6. Questions ouvertes
 
-1. **API de StudioEdge** : Quicklink donne-t-il un accès pour piloter les appels, ou passe-t-on par Buttons ?
-2. **Encodeurs GO** : leur API permet-elle de lancer et d'arrêter la diffusion, ou seulement de lire l'état ?
-3. **CLEAN sur vMix** : quelle sortie le porte dans votre configuration ?
+1. **StudioEdge** : que permet son interface de contrôle (lancer ou accepter un appel, l'envoyer sur une sortie, lire son état et ses niveaux) ? La documentation de Quicklink est derrière une protection anti-robot : un extrait, ou une capture de la page API, suffira.
