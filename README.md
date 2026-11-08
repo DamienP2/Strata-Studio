@@ -79,6 +79,7 @@ Le journal (`/api/state`) montre l'intention comprise, le 50/50 préparé puis p
 | `strata-studio-core` | le studio (places, caméras, plans, sources extérieures), la perception, les profils, le **Réalisateur** (fonction pure, testée sur des conversations scriptées) et l'**écoute** de l'animateur (des intentions tirées de ses phrases) |
 | `strata-studio-devices` | les interfaces des appareils (mélangeur, nodal, PTZ, console, Bitfocus), leurs simulateurs, la console Midas M32 (OSC) les caméras Sony en VISCA over IP, et les mélangeurs **ATEM** (UDP 9910 : coupe, SuperSource, macros, lecture du programme) et **vMix** (TCP 8099 : coupe, couches des mises en page, tally) |
 | `strata-studio-sense` | les micros reçus en **AES67** (SAP, SDP, RTP L24) et qui parle, repisse écartée ; l'oreille de l'animateur : son micro découpé en phrases, transcrites par un serveur whisper.cpp local, sans les textes que Whisper invente dans le silence ; l'exemple `ecoute` l'essaie sur un enregistrement |
+| `strata-studio-media` | l'**enregistrement** : jusqu'à 6 canaux (PGM, CLEAN, 4 caméras) encodés par ffmpeg en H.264 / H.265 4:2:2, MP4 ou MOV, un WAV 24 bits par micro ; après le tournage, les versions 9:16 et la copie vers le stockage |
 | `strata-studio-bench` | `banc-encodage` : combien de canaux 4:2:2 (H.264, H.265 ; 1080p50, 2160p50) la machine encode en temps réel |
 | `strata-studio-server` | l'exécutable `strata-studio` : studio simulé, API d'état et de reprise en main |
 
@@ -115,3 +116,17 @@ cargo run --release -p strata-studio-bench -- --res 2160 --codec h265 --accel nv
 ```
 
 `--accel` : `cpu`, `nvenc` (NVIDIA ; le 4:2:2 demande une carte Blackwell et un FFmpeg récent) ou `qsv` (Intel, H.265 4:2:2 10 bits). Le verdict dit combien de canaux tiennent avec 10 % de marge ; Studio en demande jusqu'à 6, plus la diffusion.
+
+## Enregistrer
+
+Le serveur enregistre sur ses disques (`--rec-dir`). Les entrées de chaque canal, le codec, l'accélération et le conteneur se règlent dans un fichier JSON (`--rec-settings`) ; sans lui, le studio simulé enregistre des images générées, encodées sur le processeur.
+
+```bash
+curl -X POST localhost:8095/api/record/start -H 'content-type: application/json' -d '{"programme": "Le Grand Débrief", "pgm": true, "clean": true, "iso": false, "mics": true, "resolution": "2160p50", "vertical": true, "destination": "/mnt/partage"}'
+```
+
+```bash
+curl -X POST localhost:8095/api/record/stop
+```
+
+`GET /api/record/status` donne l'état de chaque canal pendant le tournage, puis l'avancement des versions 9:16 et de la copie. `POST /api/record/estimate` (mêmes réponses) donne le temps d'enregistrement possible sur le disque.

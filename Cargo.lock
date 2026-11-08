@@ -563,6 +563,9 @@ dependencies = [
 [[package]]
 name = "strata-studio-bench"
 version = "0.1.0"
+dependencies = [
+ "strata-studio-media",
+]
 
 [[package]]
 name = "strata-studio-core"
@@ -576,6 +579,15 @@ dependencies = [
 name = "strata-studio-devices"
 version = "0.1.0"
 dependencies = [
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "strata-studio-media"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "thiserror",
  "tracing",
 ]
@@ -601,6 +613,7 @@ dependencies = [
  "serde_json",
  "strata-studio-core",
  "strata-studio-devices",
+ "strata-studio-media",
  "strata-studio-sense",
  "tokio",
  "tracing",

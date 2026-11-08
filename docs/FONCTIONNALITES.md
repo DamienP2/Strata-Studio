@@ -123,12 +123,21 @@ Chaque intention comprise s'écrit dans le journal, avec sa phrase.
 
 Studio reçoit une **copie AES67** des micros depuis le réseau Dante (le flux est découvert par SAP ou donné par son SDP ; RTP L24 à 48 kHz). Pour chaque place, une voix est détectée sur son canal ; un micro qui n'entend qu'une voix voisine, à plus de 9 dB sous la plus forte, est de la **repisse** et ne compte pas. Les courts silences entre deux mots ne coupent pas une phrase. Un modèle de voix (Silero) remplacera la simple mesure de niveau ; la comparaison entre micros reste.
 
-### 2.7 Les mélangeurs
+### 2.7 L'enregistrement
+
+- Chaque canal vidéo choisi (PGM, CLEAN, les 4 caméras) est enregistré par **son propre ffmpeg**, à partir de son entrée (DeckLink, flux, etc., réglée dans l'administration), mis à 1080p50 ou 2160p50 et encodé en **H.264 ou H.265 4:2:2 10 bits**, en **MOV** (son en PCM 24 bits) ou **MP4** (son en AAC).
+- Chaque micro est écrit dans **son propre WAV 24 bits 48 kHz**, directement depuis le flux AES67, nommé au nom de l'invité.
+- Les fichiers sont rangés `programme/date/programme_date_CANAL`.
+- Chaque canal est **surveillé** : un ffmpeg qui s'arrête, un fichier qui ne grossit plus, s'affichent sur la tablette.
+- À l'arrêt, chaque fichier est fermé proprement ; puis, en arrière-plan, les **versions 9:16** (le centre de l'image, 1080 × 1920) et la **copie** vers le partage choisi, avec la progression ; un fichier n'apparaît sur le partage qu'une fois copié en entier.
+- Le **temps d'enregistrement restant** se calcule avec les choix de la tablette et la place libre du serveur.
+
+### 2.8 Les mélangeurs
 
 - **ATEM** (tous les modèles, UDP 9910) : coupe par l'entrée programme ; le 50/50 et la vignette sont des mises en page de la **SuperSource**, dont Studio règle les cases (source, position, taille) avant de la prendre ; Studio lit l'entrée programme pour voir une coupe faite au pupitre. La géométrie des cases est un réglage ; le format des commandes SuperSource est celui des ATEM récents et **reste à valider sur l'ATEM du studio**.
 - **vMix** (TCP 8099) : coupe directe ; le 50/50 et la vignette sont **deux entrées de mise en page à deux couches** préparées dans vMix, dont Studio remplit les couches avant de les prendre ; le tally abonné donne le programme.
 
-### 2.8 Ce qui est piloté par Buttons
+### 2.9 Ce qui est piloté par Buttons
 
 L'**allumage** au début et l'**extinction** à la fin (lumière par défaut, caméras) passent par Bitfocus Buttons, comme le reste des automations ; la mise sous tension des caméras peut aussi se faire en VISCA. Le **Stream Deck** passe aussi par Buttons (§ 3.2).
 

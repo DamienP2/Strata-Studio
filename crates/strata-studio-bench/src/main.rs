@@ -19,6 +19,7 @@
 
 use std::process::{Command, Stdio};
 use std::time::Instant;
+use strata_studio_media::encoder::{Accel, Codec, Encoder, Resolution};
 
 const RATE: u32 = 50;
 const MARGIN: f64 = 1.10;
@@ -69,59 +70,35 @@ fn parse() -> Result<Args, String> {
     Ok(a)
 }
 
-/// The encoder options for a codec and an acceleration, 4:2:2.
+/// The encoder options for a codec and an acceleration, 4:2:2: the same
+/// as Studio's recordings.
 fn encoder(a: &Args) -> Result<(Vec<String>, String), String> {
-    let bitrate = if a.res == 2160 { "150M" } else { "50M" };
-    let (args, pix): (&[&str], &str) = match (a.accel.as_str(), a.codec.as_str()) {
-        ("cpu", "h264") => (
-            &[
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-profile:v",
-                "high422",
-            ],
-            "yuv422p10le",
-        ),
-        ("cpu", "h265") => (
-            &[
-                "-c:v",
-                "libx265",
-                "-preset",
-                "ultrafast",
-                "-x265-params",
-                "log-level=error",
-            ],
-            "yuv422p10le",
-        ),
-        ("nvenc", "h264") => (
-            &[
-                "-c:v",
-                "h264_nvenc",
-                "-preset",
-                "p4",
-                "-profile:v",
-                "high422",
-            ],
-            "nv16",
-        ),
-        ("nvenc", "h265") => (
-            &["-c:v", "hevc_nvenc", "-preset", "p4", "-profile:v", "rext"],
-            "p210le",
-        ),
-        ("qsv", "h265") => (&["-c:v", "hevc_qsv", "-preset", "veryfast"], "y210le"),
-        ("qsv", "h264") => {
-            return Err("Quick Sync n'encode pas le H.264 en 4:2:2 : essayez --codec h265".into())
-        }
-        _ => return Err(format!("combinaison inconnue : {} / {}", a.accel, a.codec)),
+    let codec = match a.codec.as_str() {
+        "h264" => Codec::H264,
+        "h265" => Codec::H265,
+        c => return Err(format!("codec inconnu : {c}")),
     };
-    let mut v: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    v.extend(["-b:v".to_string(), bitrate.to_string()]);
-    if let Some(o) = &a.opts {
-        v.extend(o.split_whitespace().map(String::from));
-    }
-    Ok((v, a.pix_fmt.clone().unwrap_or_else(|| pix.to_string())))
+    let accel = match a.accel.as_str() {
+        "cpu" => Accel::Cpu,
+        "nvenc" => Accel::Nvenc,
+        "qsv" => Accel::Qsv,
+        x => return Err(format!("accélération inconnue : {x}")),
+    };
+    let res = if a.res == 2160 {
+        Resolution::Uhd
+    } else {
+        Resolution::Hd
+    };
+    let mut enc = Encoder::new(codec, accel, res);
+    enc.pix_fmt = a.pix_fmt.clone();
+    enc.extra = a
+        .opts
+        .as_deref()
+        .unwrap_or("")
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+    enc.args().map_err(|e| e.to_string())
 }
 
 fn command(a: &Args, enc: &[String], pix: &str) -> Command {

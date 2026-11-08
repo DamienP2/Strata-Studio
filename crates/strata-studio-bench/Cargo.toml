@@ -7,3 +7,6 @@ license.workspace = true
 [[bin]]
 name = "banc-encodage"
 path = "src/main.rs"
+
+[dependencies]
+strata-studio-media.workspace = true

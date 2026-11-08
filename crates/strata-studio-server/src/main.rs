@@ -15,8 +15,11 @@
 //! | `POST /api/control/lock/{cam}` · `/unlock/{cam}` | the AI leaves a camera alone |
 //! | `POST /api/control/profile/{n}` | profile: 0 podcast, 1 débat, 2 interview, 3 radio |
 //! | `POST /api/demo/panel-cut/{input}` | simulate a person cutting on the switcher's panel |
+//! | `POST /api/record/estimate` · `/start` · `/stop` · `GET /api/record/status` | the recording: time left, start with the tablet's answers, stop (then 9:16 versions and copy in the background), state of each channel |
 //! | `POST /api/demo/say` | simulate the host's words (`{"text": "On retrouve Julie en duplex"}`), as the speech recogniser would give them |
 //! | `POST /api/demo/remote/{id}/voice/{on}` | simulate a remote source speaking (`on` = 1) or silent (0) |
+
+mod record;
 
 use anyhow::Context;
 use axum::extract::{Path, Query, State};
@@ -78,7 +81,21 @@ struct Args {
     /// The whisper.cpp server transcribing the host's microphone.
     #[arg(long)]
     whisper: Option<String>,
+    /// Where the recordings are written on the server.
+    #[arg(long, default_value = "enregistrements")]
+    rec_dir: String,
+    /// The recording settings (codec, acceleration, container, each
+    /// channel's ffmpeg input), as JSON; else the simulated studio's.
+    #[arg(long)]
+    rec_settings: Option<String>,
+    /// The ffmpeg to record with.
+    #[arg(long, default_value = "ffmpeg")]
+    ffmpeg: String,
 }
+
+/// What the audio start gives: the voices, the ear's output, the
+/// microphones' stream (channels, rate).
+type Audio = (Option<SharedVoices>, EarOut, Option<(usize, u32)>);
 
 /// The real microphones' voices, shared with the thread receiving them.
 type SharedVoices = Arc<Mutex<Voices>>;
@@ -90,10 +107,11 @@ fn start_audio(
     args: &Args,
     host: SeatId,
     host_channel: u16,
-) -> anyhow::Result<(Option<SharedVoices>, EarOut)> {
+    mic_sink: record::MicSink,
+) -> anyhow::Result<Audio> {
     let heard = Arc::new(Mutex::new(Vec::new()));
     let Some(path) = &args.aes67 else {
-        return Ok((None, heard));
+        return Ok((None, heard, None));
     };
     let sdp = std::fs::read_to_string(path).with_context(|| format!("lecture de {path}"))?;
     let stream = aes67::parse_sdp(&sdp)?;
@@ -141,6 +159,11 @@ fn start_audio(
         .spawn(move || {
             for block in rx {
                 v.lock().unwrap().feed(&block);
+                if let Some(m) = mic_sink.lock().unwrap().as_mut() {
+                    if let Err(e) = m.feed(&block) {
+                        tracing::warn!("micros : {e}");
+                    }
+                }
                 if let Some(tx) = &ear_tx {
                     let host: Vec<f32> = block
                         .iter()
@@ -154,7 +177,8 @@ fn start_audio(
                 }
             }
         })?;
-    Ok((Some(voices), heard))
+    let layout = (stream.channels as usize, stream.rate);
+    Ok((Some(voices), heard, Some(layout)))
 }
 
 /// The switcher: a real one when its address is given, else the simulated one.
@@ -217,6 +241,8 @@ struct App {
     voices: Option<Arc<Mutex<Voices>>>,
     /// What the host's ear heard, not yet listened to.
     ear_out: Arc<Mutex<Vec<Heard>>>,
+    /// The recording desk.
+    desk: Option<record::Desk>,
 }
 
 type Shared = Arc<Mutex<App>>;
@@ -242,6 +268,7 @@ impl App {
             drive_until: BTreeMap::new(),
             voices: None,
             ear_out: Arc::new(Mutex::new(Vec::new())),
+            desk: None,
             director: Director::new(setup, profile),
             control: Control::default(),
             switcher,
@@ -780,6 +807,74 @@ async fn say(State(app): State<Shared>, Json(said): Json<Say>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
+async fn record_estimate(
+    State(app): State<Shared>,
+    Json(req): Json<record::RecordRequest>,
+) -> Json<serde_json::Value> {
+    let app = app.lock().unwrap();
+    let hours = app.desk.as_ref().and_then(|d| d.estimate(&req));
+    Json(serde_json::json!({ "hours": hours }))
+}
+
+async fn record_start(
+    State(app): State<Shared>,
+    Json(req): Json<record::RecordRequest>,
+) -> (StatusCode, String) {
+    let mut app = app.lock().unwrap();
+    let setup = app.director.setup().clone();
+    let mics: Vec<(String, u16)> = setup
+        .seats
+        .iter()
+        .filter(|s| s.guest.is_some())
+        .map(|s| (s.display_name().to_string(), s.mic.dante_channel))
+        .collect();
+    let programme = req.programme.clone();
+    let Some(desk) = app.desk.as_mut() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "pas de pupitre d'enregistrement".into(),
+        );
+    };
+    match desk.start(req, &mics) {
+        Ok(()) => {
+            app.log(format!("ENREGISTREMENT lancé : {programme}"), true);
+            (StatusCode::NO_CONTENT, String::new())
+        }
+        Err(e) => (StatusCode::CONFLICT, e),
+    }
+}
+
+async fn record_stop(State(app): State<Shared>) -> (StatusCode, Json<serde_json::Value>) {
+    let mut app = app.lock().unwrap();
+    let Some(desk) = app.desk.as_mut() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "pas de pupitre" })),
+        );
+    };
+    match desk.stop() {
+        Ok(channels) => {
+            app.log("ENREGISTREMENT arrêté".into(), true);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "channels": channels })),
+            )
+        }
+        Err(e) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": e })),
+        ),
+    }
+}
+
+async fn record_status(State(app): State<Shared>) -> Json<serde_json::Value> {
+    let mut app = app.lock().unwrap();
+    match app.desk.as_mut() {
+        Some(d) => Json(serde_json::to_value(d.status()).unwrap_or_default()),
+        None => Json(serde_json::json!({ "recording": false })),
+    }
+}
+
 async fn remote_voice(State(app): State<Shared>, Path((id, on)): Path<(u8, u8)>) -> StatusCode {
     let mut app = app.lock().unwrap();
     if app.director.setup().remote(RemoteId(id)).is_none() {
@@ -804,6 +899,10 @@ fn router(app: Shared) -> Router {
         .route("/api/control/profile/{n}", post(profile))
         .route("/api/demo/panel-cut/{input}", post(panel_cut))
         .route("/api/demo/say", post(say))
+        .route("/api/record/estimate", post(record_estimate))
+        .route("/api/record/start", post(record_start))
+        .route("/api/record/stop", post(record_stop))
+        .route("/api/record/status", get(record_status))
         .route("/api/demo/remote/{id}/voice/{on}", post(remote_voice))
         .with_state(app)
 }
@@ -828,9 +927,24 @@ async fn main() -> anyhow::Result<()> {
         let setup = a.director.setup().clone();
         let host = setup.host_seat().unwrap_or(SeatId(1));
         let host_channel = setup.seat(host).map_or(0, |s| s.mic.dante_channel);
-        let (voices, heard) = start_audio(&args, host, host_channel)?;
+        let mic_sink: record::MicSink = Arc::new(Mutex::new(None));
+        let (voices, heard, stream) = start_audio(&args, host, host_channel, mic_sink.clone())?;
         a.voices = voices;
         a.ear_out = heard;
+        let settings = match &args.rec_settings {
+            Some(path) => serde_json::from_str(
+                &std::fs::read_to_string(path).with_context(|| format!("lecture de {path}"))?,
+            )
+            .with_context(|| format!("réglages d'enregistrement : {path}"))?,
+            None => record::RecordSettings::demo(),
+        };
+        a.desk = Some(record::Desk::new(
+            args.rec_dir.clone().into(),
+            args.ffmpeg.clone(),
+            settings,
+            mic_sink,
+            stream,
+        ));
     }
     {
         let mut a = app.lock().unwrap();

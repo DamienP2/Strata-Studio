@@ -12,6 +12,7 @@ path = "src/main.rs"
 strata-studio-core.workspace = true
 strata-studio-devices.workspace = true
 strata-studio-sense.workspace = true
+strata-studio-media.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
