@@ -104,7 +104,9 @@ pub fn rtp_l24(packet: &[u8], payload_type: u8) -> Option<Vec<f32>> {
     let payload = packet.get(at..end)?;
     Some(
         payload
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|b| {
                 (((b[0] as i32) << 24 | (b[1] as i32) << 16 | (b[2] as i32) << 8) >> 8) as f32
                     / 8_388_608.0
