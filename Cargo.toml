@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/strata-studio-core", "crates/strata-studio-devices", "crates/strata-studio-server"]
+members = ["crates/strata-studio-core", "crates/strata-studio-devices", "crates/strata-studio-sense", "crates/strata-studio-server"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,7 @@ anyhow = "1"
 tracing = "0.1"
 strata-studio-core = { path = "crates/strata-studio-core" }
 strata-studio-devices = { path = "crates/strata-studio-devices" }
+strata-studio-sense = { path = "crates/strata-studio-sense" }
 
 [profile.release]
 lto = "thin"

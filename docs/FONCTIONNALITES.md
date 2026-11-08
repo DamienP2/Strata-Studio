@@ -86,7 +86,7 @@ L'API ne documente **ni les niveaux audio ni le tally** : pendant les tests, le 
 
 ### 2.5 L'écoute de l'animateur
 
-Une petite IA de **reconnaissance vocale**, locale (Whisper sur la carte du serveur), écoute **le seul micro de l'animateur** et anticipe ses besoins. Ce qu'elle comprend est une **intention**, jamais un ordre :
+Une petite IA de **reconnaissance vocale**, locale (Whisper sur la carte du serveur), écoute **le seul micro de l'animateur** et anticipe ses besoins. Le micro est découpé en phrases (et en morceaux de 2 s pour les longues, pour préparer plus tôt), chaque phrase est transcrite par un **serveur whisper.cpp local**, et les textes que Whisper invente dans le silence (« Sous-titres réalisés par… », « Merci d'avoir regardé ») sont écartés. Ce qu'elle comprend est une **intention**, jamais un ordre :
 
 | L'animateur dit | Studio comprend | Studio fait |
 | --- | --- | --- |

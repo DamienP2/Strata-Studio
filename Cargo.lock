@@ -577,6 +577,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-studio-sense"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "strata-studio-core",
+ "thiserror",
+]
+
+[[package]]
 name = "strata-studio-server"
 version = "0.1.0"
 dependencies = [

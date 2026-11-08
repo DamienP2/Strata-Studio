@@ -57,7 +57,8 @@ Le journal (`/api/state`) montre l'intention comprise, le 50/50 préparé puis p
 | Crate | Rôle |
 | --- | --- |
 | `strata-studio-core` | le studio (places, caméras, plans, sources extérieures), la perception, les profils, le **Réalisateur** (fonction pure, testée sur des conversations scriptées) et l'**écoute** de l'animateur (des intentions tirées de ses phrases) |
-| `strata-studio-devices` | les interfaces des appareils (mélangeur, nodal, PTZ, console, Bitfocus), leurs simulateurs, la console Midas M32 (OSC) |
+| `strata-studio-devices` | les interfaces des appareils (mélangeur, nodal, PTZ, console, Bitfocus), leurs simulateurs, la console Midas M32 (OSC) et les caméras Sony en VISCA over IP |
+| `strata-studio-sense` | l'oreille de l'animateur : son micro découpé en phrases, transcrites par un serveur whisper.cpp local, sans les textes que Whisper invente dans le silence ; l'exemple `ecoute` l'essaie sur un enregistrement |
 | `strata-studio-server` | l'exécutable `strata-studio` : studio simulé, API d'état et de reprise en main |
 
 ```bash
@@ -67,3 +68,19 @@ cargo test --workspace
 ```bash
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+## Essayer l'écoute sur un enregistrement
+
+Il faut un serveur whisper.cpp sur la machine, avec un modèle multilingue (`ggml-base.bin` ou plus gros) :
+
+```bash
+whisper-server -m models/ggml-base.bin --host 127.0.0.1 --port 8178 -l fr
+```
+
+Puis, sur un enregistrement du micro de l'animateur (WAV 16 bits) :
+
+```bash
+cargo run -p strata-studio-sense --example ecoute -- enregistrement.wav
+```
+
+Chaque phrase entendue s'affiche, avec ce que le Réalisateur en comprend.
