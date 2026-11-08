@@ -4,18 +4,26 @@
 //! | Interface | Devices (planned) |
 //! | --- | --- |
 //! | [`Switcher`] | Blackmagic ATEM, all models (UDP 9910, [`atem`]), vMix (TCP 8099, [`vmix`]) |
-//! | [`Router`] | Videohub (TCP 9990, [`videohub`]); NMOS IS-05 without a registry (ST 2110) and NDI routing to come |
+//! | [`Router`] | Videohub (TCP 9990, [`videohub`]), NMOS IS-05 without a registry (ST 2110, [`nmos`]), Studio's own NDI routing ([`ndi`]) |
 //! | [`Ptz`] | Sony FR7, BRC-AM7 (VISCA over IP, [`visca`]) |
 //! | [`AudioConsole`] | Midas M32 (OSC, [`m32`]), Yamaha DM5 (RCP, [`yamaha`]) |
 //! | [`Automation`] | Bitfocus Buttons (HTTP, [`buttons`]): lights (DMX), ON AIR, the rest |
+//! | [`webencoder::GoEncoder`] | the GO platforms: Blackmagic Streaming Encoder 4K (REST, [`webencoder`]) |
+//! | [`quicklink::Calls`] | the calls: Quicklink StudioEdge (REST API v1.5, [`quicklink`]) |
 
 pub mod atem;
 pub mod buttons;
 pub mod m32;
+pub mod ndi;
+pub mod nmos;
+pub mod quicklink;
 pub mod sim;
+#[cfg(test)]
+mod testhttp;
 pub mod videohub;
 pub mod visca;
 pub mod vmix;
+pub mod webencoder;
 pub mod yamaha;
 
 use thiserror::Error;
@@ -96,6 +104,10 @@ pub trait Ptz: Send {
     fn zoom(&mut self, speed: f32) -> Result<()>;
     /// Pan and tilt at speeds from -1 to 1 (right, up); 0 and 0 stop.
     fn drive(&mut self, pan: f32, tilt: f32) -> Result<()>;
+    /// Switch the camera on, or to standby.
+    fn power(&mut self, _on: bool) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// The audio console the microphones go through.

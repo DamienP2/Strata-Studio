@@ -8,9 +8,15 @@
 //!   comes.
 //! - [`after`]: after the shoot, the 9:16 versions cut from the 16:9
 //!   files, and the copy to the final storage, with its progress.
+//! - [`live`]: YouTube and TikTok (9:16) streamed by the server, and the
+//!   small previews of the sources for the browser.
+//! - [`export`]: the edit of a shoot for the editing software (EDL,
+//!   FCPXML, Premiere XML, OpenTimelineIO).
 
 pub mod after;
 pub mod encoder;
+pub mod export;
+pub mod live;
 pub mod recorder;
 pub mod wav;
 

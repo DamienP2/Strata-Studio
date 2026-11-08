@@ -37,6 +37,11 @@ pub fn datagram(seq: u32, msg: &[u8]) -> Vec<u8> {
 }
 
 /// Recall preset `preset` (0-based on the wire; Studio's presets are 1-based).
+/// `CAM_Power`: on, or standby.
+pub fn power(on: bool) -> Vec<u8> {
+    vec![0x81, 0x01, 0x04, 0x00, if on { 0x02 } else { 0x03 }, 0xFF]
+}
+
 pub fn preset_recall(preset: u8) -> Vec<u8> {
     vec![0x81, 0x01, 0x04, 0x3F, 0x02, preset.saturating_sub(1), 0xFF]
 }
@@ -136,6 +141,9 @@ impl Ptz for ViscaPtz {
     }
     fn drive(&mut self, pan: f32, tilt: f32) -> Result<()> {
         self.send(&drive(pan, tilt))
+    }
+    fn power(&mut self, on: bool) -> Result<()> {
+        self.send(&power(on))
     }
 }
 
