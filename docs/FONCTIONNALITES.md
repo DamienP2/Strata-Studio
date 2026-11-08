@@ -70,7 +70,18 @@ Jusqu'ici Studio ne faisait que piloter. **L'enregistrement et une partie de la 
 
 ### 2.4 Les flux extérieurs
 
-- **Call** : Quicklink StudioEdge reçoit les appels **Studiocall, Teams ou Zoom** et les sort vers le mélangeur. Studio prépare autant d'entrées que d'appels simultanés choisis. Pour le pilotage des appels, la référence est la documentation StudioCall Live de Quicklink (support.quicklink.tv, catégorie « QuickLink StudioCall Live ») : Studio passe par son interface de contrôle si elle couvre le besoin, sinon par Buttons. Ce point reste à confirmer, la documentation n'ayant pas encore pu être lue (accès protégé).
+- **Call** : Quicklink StudioEdge reçoit les appels **Studiocall, Teams ou Zoom** et les sort vers le mélangeur. Studio prépare autant d'entrées que d'appels simultanés choisis, et pilote les appels par l'**API REST Quicklink v1.5** (référence : « API v1.5 Reference » du support Quicklink) :
+
+| Besoin | Ce que l'API donne |
+| --- | --- |
+| Inviter | `POST createguest` : un invité par appel, valable le temps du tournage ; Studio en tire le **lien d'invitation** (affiché sur la tablette, en QR code, à copier) |
+| Savoir s'il est là | **Socket.IO** (`UserUpdate`, `UserDisconnected`) : connexion, état *Ready* / *In Call*, et alerte de **perte de paquets** au-delà de 2 % sur 20 s |
+| Le placer sur une sortie | `POST joindistributor/:uid/:roomid/:position` et `leavedistributor` : chaque invité prend une position de la salle de distribution, qui correspond à une entrée du mélangeur (correspondance à confirmer sur StudioEdge) |
+| Couper son micro ou son image | `POST mute/:uid/:audio/:video` |
+| Lancer, arrêter | `POST startcall` / `stopcall` (salles point à point) |
+| S'authentifier | `GET createNewToken` : un jeton valable 24 h, renouvelé par Studio |
+
+L'API ne documente **ni les niveaux audio ni le tally** : pendant les tests, le son d'un appel se mesure à son arrivée sur le mélangeur, comme pour une personne du plateau.
 - **Agence de presse** et **duplex Aviwest** : une entrée du mélangeur chacun, testée comme une personne (image et son) à l'étape 12.
 
 ### 2.5 Ce qui est piloté par Buttons
@@ -94,7 +105,7 @@ Le contrôle se fait **une question à la fois**, sans identification. Une colon
 | 7 | **Format** | 16:9 seul, ou 16:9 et 9:16 | cadrages pensés pour le 9:16 ; versions 9:16 fabriquées après |
 | 8 | **Diffusion** | Plateforme GO (une parmi GO1 à GO4, **grisée si déjà utilisée**), YouTube, TikTok ; en boutons, ou aucune | prépare les flux et les routes |
 | 9 | **Personnes** | nombre et noms | prépare un micro par personne |
-| 10 | **Flux extérieurs** | Call (combien en même temps), agence de presse, duplex Aviwest | prépare les entrées du mélangeur |
+| 10 | **Flux extérieurs** | Call (combien en même temps), agence de presse, duplex Aviwest ; envoie à chaque invité son lien (QR code ou copie) | crée les invités Quicklink, suit leur connexion, prépare les entrées du mélangeur |
 | 11 | **Placement** | place chaque personne autour de la table | associe places, micros et caméras |
 | 12 | **Tests** | une personne, puis chaque source extérieure, l'une après l'autre : image et son | l'**écran du studio** montre la bonne caméra, la zone 9:16 (ou le 9:16 seul), le vumètre et la consigne en surimpression |
 | 13 | **Récapitulatif** | relit, puis **lance l'enregistrement** (appui long) | dernières vérifications ; pendant le tournage, seulement la surveillance et **Terminer** (pas de pause, pas de touche toux) |
@@ -139,4 +150,4 @@ Un écran 16:9 sur le plateau, piloté par Studio :
 
 ## 6. Questions ouvertes
 
-1. **StudioEdge** : que permet son interface de contrôle (lancer ou accepter un appel, l'envoyer sur une sortie, lire son état et ses niveaux) ? La documentation de Quicklink est derrière une protection anti-robot : un extrait, ou une capture de la page API, suffira.
+1. **StudioEdge** : les positions de la salle de distribution correspondent-elles bien, une à une, aux sorties vidéo de StudioEdge (et donc aux entrées du mélangeur) ?
