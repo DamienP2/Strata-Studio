@@ -5,12 +5,13 @@
 //! | --- | --- |
 //! | [`Switcher`] | Blackmagic ATEM, all models (UDP 9910), vMix (TCP 8099) |
 //! | [`Router`] | Videohub (TCP 9990), NMOS IS-05 without a registry (ST 2110), NDI routing done by Studio |
-//! | [`Ptz`] | Sony FR7, BRC-AM7 (VISCA over IP, CGI) |
+//! | [`Ptz`] | Sony FR7, BRC-AM7 (VISCA over IP, [`visca`]) |
 //! | [`AudioConsole`] | Midas M32 (OSC, [`m32`]), Yamaha DM5 (RCP) |
 //! | [`Automation`] | Bitfocus Buttons: lights (DMX), ON AIR, the rest |
 
 pub mod m32;
 pub mod sim;
+pub mod visca;
 
 use thiserror::Error;
 
@@ -59,6 +60,10 @@ pub trait Ptz: Send {
     fn name(&self) -> String;
     fn recall(&mut self, preset: u8) -> Result<()>;
     fn status(&mut self) -> PtzStatus;
+    /// Zoom at a speed from -1 (wide) to 1 (tele); 0 stops.
+    fn zoom(&mut self, speed: f32) -> Result<()>;
+    /// Pan and tilt at speeds from -1 to 1 (right, up); 0 and 0 stop.
+    fn drive(&mut self, pan: f32, tilt: f32) -> Result<()>;
 }
 
 /// The audio console the microphones go through.

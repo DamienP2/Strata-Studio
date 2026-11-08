@@ -36,6 +36,44 @@ pub struct Profile {
     /// A remote gone for this long ends its part of the show.
     #[serde(default = "d_remote_lost")]
     pub remote_lost_ms: u64,
+    /// A wide shot comes back at least this often, to breathe.
+    #[serde(default = "d_breathe")]
+    pub breathe_every_ms: u64,
+    /// A person speaking this long on their close shot gets a listening shot.
+    #[serde(default = "d_reaction_after")]
+    pub reaction_after_ms: u64,
+    /// How long a listening shot lasts.
+    #[serde(default = "d_reaction")]
+    pub reaction_ms: u64,
+    /// A close shot on air this long starts a very slow zoom in.
+    #[serde(default = "d_drift_after")]
+    pub drift_after_ms: u64,
+    /// How long that zoom lasts.
+    #[serde(default = "d_drift")]
+    pub drift_ms: u64,
+    /// The face may move this far (fraction of the picture) before the
+    /// camera follows it.
+    #[serde(default = "d_follow")]
+    pub follow_tolerance: f32,
+}
+
+fn d_breathe() -> u64 {
+    40000
+}
+fn d_reaction_after() -> u64 {
+    9000
+}
+fn d_reaction() -> u64 {
+    2500
+}
+fn d_drift_after() -> u64 {
+    2500
+}
+fn d_drift() -> u64 {
+    12000
+}
+fn d_follow() -> f32 {
+    0.08
 }
 
 fn d_phrase_end() -> u64 {
@@ -68,6 +106,12 @@ impl Profile {
             remote_full_ms: d_remote_full(),
             cue_life_ms: d_cue_life(),
             remote_lost_ms: d_remote_lost(),
+            breathe_every_ms: d_breathe(),
+            reaction_after_ms: d_reaction_after(),
+            reaction_ms: d_reaction(),
+            drift_after_ms: d_drift_after(),
+            drift_ms: d_drift(),
+            follow_tolerance: d_follow(),
         }
     }
 

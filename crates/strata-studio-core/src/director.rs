@@ -72,6 +72,10 @@ pub struct Control {
     pub banned_shots: BTreeSet<ShotId>,
     #[serde(default)]
     pub forced: Option<Forced>,
+    /// The show is also made in 9:16: close shots stay centred and do not
+    /// zoom in.
+    #[serde(default)]
+    pub vertical: bool,
 }
 
 impl Default for Control {
@@ -81,6 +85,7 @@ impl Default for Control {
             locked_cams: BTreeSet::new(),
             banned_shots: BTreeSet::new(),
             forced: None,
+            vertical: false,
         }
     }
 }
@@ -130,6 +135,23 @@ pub enum Reason {
     Addressed {
         seat: SeatId,
     },
+    /// A wide shot, to breathe.
+    Breathe,
+    /// A listening shot during a long speech.
+    Reaction {
+        seat: SeatId,
+        speaker: SeatId,
+    },
+    /// Back to the person speaking after a listening shot.
+    BackToSpeaker {
+        seat: SeatId,
+    },
+    /// A very slow movement on air, to give life.
+    Life,
+    /// The camera follows the person who moved.
+    Follow,
+    /// A camera back to its framing once off air.
+    Reframe,
 }
 
 impl Reason {
@@ -168,6 +190,16 @@ impl Reason {
             Reason::Addressed { seat } => {
                 format!("l'animateur donne la parole à {}", setup.seat_name(*seat))
             }
+            Reason::Breathe => "plan large pour respirer".into(),
+            Reason::Reaction { seat, speaker } => format!(
+                "plan d'écoute : {} écoute {}",
+                setup.seat_name(*seat),
+                setup.seat_name(*speaker)
+            ),
+            Reason::BackToSpeaker { seat } => format!("retour sur {}", setup.seat_name(*seat)),
+            Reason::Life => "zoom très lent pour donner de la vie".into(),
+            Reason::Follow => "la caméra suit la personne".into(),
+            Reason::Reframe => "retour au cadre d'origine".into(),
         }
     }
 }
@@ -204,6 +236,21 @@ pub enum Decision {
     Preload { program: Composite, reason: Reason },
     /// A spoken cue was understood (for the journal).
     Understood { hint: Hint },
+    /// Start a very slow zoom (`zoom` > 0: in) for `for_ms` on the camera on air.
+    Drift {
+        camera: CamId,
+        zoom: f32,
+        for_ms: u64,
+        reason: Reason,
+    },
+    /// Nudge a camera towards the person framed (speeds from -1 to 1:
+    /// pan right, tilt up).
+    Follow {
+        camera: CamId,
+        pan: f32,
+        tilt: f32,
+        reason: Reason,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -260,6 +307,16 @@ pub struct Director {
     /// The composite on air, since when, and the cameras in it.
     composite: Option<(Composite, u64, Vec<CamId>)>,
     preloaded: Option<Composite>,
+    /// When a wide shot was last on air.
+    last_wide: u64,
+    prev_speaker: Option<SeatId>,
+    /// A listening shot on air: who was speaking, since when.
+    reaction: Option<(SeatId, u64)>,
+    /// The camera zooming slowly on air, since when.
+    drifting: Option<(CamId, u64)>,
+    /// Cameras to put back on their framing once off air.
+    reset_cams: BTreeSet<CamId>,
+    last_follow: BTreeMap<CamId, u64>,
 }
 
 impl Director {
@@ -277,6 +334,12 @@ impl Director {
             recent: VecDeque::new(),
             prepared: BTreeMap::new(),
             was_manual: false,
+            last_wide: 0,
+            prev_speaker: None,
+            reaction: None,
+            drifting: None,
+            reset_cams: BTreeSet::new(),
+            last_follow: BTreeMap::new(),
             intents: Vec::new(),
             remote_voice_since: BTreeMap::new(),
             remote_gone_since: BTreeMap::new(),
@@ -359,8 +422,111 @@ impl Director {
         if !self.direct_remote(p, c, t, &mut out) && !self.act_on_intents(p, c, t, &mut out) {
             self.direct(p, c, t, &mut out);
         }
+        self.animate(p, c, t, &mut out);
         self.prepare_cameras(p, c, t, &mut out);
         out
+    }
+
+    /// The usable close shot of a seat.
+    fn single_of(&self, seat: SeatId, p: &Perception, c: &Control) -> Option<Shot> {
+        self.setup
+            .shots
+            .iter()
+            .find(|x| x.kind == ShotKind::Single(seat) && self.usable(x, p, c))
+            .cloned()
+    }
+
+    /// Someone listening to `speaker`, on a usable close shot: the host
+    /// first, then the one most likely to answer; not the one shown last.
+    fn listener_shot(
+        &self,
+        speaker: SeatId,
+        p: &Perception,
+        c: &Control,
+    ) -> Option<(SeatId, Shot)> {
+        let host = self.host();
+        let mut seats: Vec<SeatId> = self
+            .setup
+            .seats
+            .iter()
+            .map(|s| s.id)
+            .filter(|s| *s != speaker)
+            .collect();
+        seats.sort_by(|a, b| {
+            let rank = |s: &SeatId| {
+                let pa = p.next_probability(*s).max(self.cue_boost(*s));
+                (
+                    Some(*s) == host,
+                    (pa * 100.0) as i32,
+                    self.last_voice.get(s).copied().unwrap_or(0),
+                )
+            };
+            rank(b).cmp(&rank(a))
+        });
+        let shots: Vec<(SeatId, Shot)> = seats
+            .into_iter()
+            .filter_map(|s| self.single_of(s, p, c).map(|x| (s, x)))
+            .collect();
+        shots
+            .iter()
+            .find(|(_, x)| !self.recent.contains(&x.id))
+            .or(shots.first())
+            .cloned()
+    }
+
+    /// Life on air: a very slow zoom on a close shot, and the camera
+    /// following the person when they move.
+    fn animate(&mut self, p: &Perception, c: &Control, t: u64, out: &mut Vec<Decision>) {
+        let Some(on) = self.on_air else { return };
+        let Some(shot) = self.setup.shot(on.shot).cloned() else {
+            return;
+        };
+        let cam = shot.camera;
+        if !self.setup.camera(cam).is_some_and(|x| x.model.is_ptz()) || c.locked_cams.contains(&cam)
+        {
+            return;
+        }
+        if let Some(f) = p.cam(cam).and_then(|x| x.subject) {
+            let (dx, dy) = (f.x - 0.5, f.y - 0.38);
+            let tol = self.profile.follow_tolerance * if c.vertical { 0.6 } else { 1.0 };
+            let due = self
+                .last_follow
+                .get(&cam)
+                .is_none_or(|l| t.saturating_sub(*l) >= 1000);
+            if (dx.abs() > tol || dy.abs() > tol) && due {
+                self.last_follow.insert(cam, t);
+                let speed = |d: f32| {
+                    if d.abs() > tol {
+                        (d * 1.5).clamp(-0.3, 0.3)
+                    } else {
+                        0.0
+                    }
+                };
+                out.push(Decision::Follow {
+                    camera: cam,
+                    pan: speed(dx),
+                    tilt: -speed(dy),
+                    reason: Reason::Follow,
+                });
+            }
+        }
+        let drifting_now = self
+            .drifting
+            .is_some_and(|(d, since)| d == cam && since >= on.since_ms);
+        if matches!(shot.kind, ShotKind::Single(_))
+            && !c.vertical
+            && !drifting_now
+            && t.saturating_sub(on.since_ms) >= self.profile.drift_after_ms
+            && self.reaction.is_none()
+        {
+            self.drifting = Some((cam, t));
+            out.push(Decision::Drift {
+                camera: cam,
+                zoom: 0.05,
+                for_ms: self.profile.drift_ms,
+                reason: Reason::Life,
+            });
+        }
     }
 
     /// The remote sources' voices and presence, and the cues heard.
@@ -861,6 +1027,7 @@ impl Director {
         };
         if let Situation::Speaking(s) = self.situation {
             if self.speaker != Some(s) {
+                self.prev_speaker = self.speaker;
                 self.speaker = Some(s);
                 out.push(Decision::Speaker { seat: Some(s) });
             }
@@ -972,6 +1139,44 @@ impl Director {
             }
         };
         let too_long = current.is_some() && held >= self.profile.max_shot_ms;
+
+        // A listening shot is short: back to the person still speaking.
+        if let Some((spk, since)) = self.reaction {
+            if !must_leave && t.saturating_sub(since) < self.profile.reaction_ms {
+                return;
+            }
+            self.reaction = None;
+            let still = matches!(self.situation, Situation::Speaking(s) if s == spk);
+            if still && !must_leave {
+                if let Some(shot) = self.single_of(spk, p, c) {
+                    self.cut(&shot, Reason::BackToSpeaker { seat: spk }, t, out);
+                    return;
+                }
+            }
+        }
+        // A long speech gets a listening shot, before the plain cutaway.
+        if !must_leave && held < self.profile.max_shot_ms && held >= self.profile.reaction_after_ms
+        {
+            if let (Some(ShotKind::Single(on)), Situation::Speaking(s)) =
+                (current.as_ref().map(|x| x.kind.clone()), &self.situation)
+            {
+                if on == *s {
+                    if let Some((listener, shot)) = self.listener_shot(on, p, c) {
+                        self.cut(
+                            &shot,
+                            Reason::Reaction {
+                                seat: listener,
+                                speaker: on,
+                            },
+                            t,
+                            out,
+                        );
+                        self.reaction = Some((on, t));
+                        return;
+                    }
+                }
+            }
+        }
         if !must_leave && held < self.profile.min_shot_ms {
             return;
         }
@@ -1030,6 +1235,27 @@ impl Director {
         } else {
             self.situation_reason()
         };
+        // Breathe: when the floor changes hands and no wide shot was seen
+        // for a while (half as long when the host takes the floor back), the
+        // wide shot comes first; the new speaker's close shot follows.
+        let since_wide = t.saturating_sub(self.last_wide);
+        let relaunch = matches!(self.situation, Situation::Speaking(s) if Some(s) == self.host())
+            && self.prev_speaker.is_some_and(|x| Some(x) != self.host());
+        let due = since_wide >= self.profile.breathe_every_ms
+            || (relaunch && since_wide >= self.profile.breathe_every_ms / 2);
+        let on_wide = matches!(current.as_ref().map(|x| &x.kind), Some(ShotKind::Wide));
+        if due && to_speaker && !on_wide && !lost && current.is_some() {
+            let wide = self
+                .setup
+                .shots
+                .iter()
+                .find(|x| x.kind == ShotKind::Wide && self.usable(x, p, c))
+                .cloned();
+            if let Some(wide) = wide {
+                self.cut(&wide, Reason::Breathe, t, out);
+                return;
+            }
+        }
         self.cut(&best, reason, t, out);
     }
 
@@ -1054,6 +1280,15 @@ impl Director {
     }
 
     fn cut(&mut self, shot: &Shot, reason: Reason, t: u64, out: &mut Vec<Decision>) {
+        if shot.kind == ShotKind::Wide {
+            self.last_wide = t;
+        }
+        self.reaction = None;
+        if let Some((cam, _)) = self.drifting.take() {
+            if cam != shot.camera {
+                self.reset_cams.insert(cam);
+            }
+        }
         self.on_air = Some(OnAir {
             shot: shot.id,
             since_ms: t,
@@ -1145,6 +1380,23 @@ impl Director {
             .filter(|cam| p.cam(cam.id).is_some_and(|s| s.online))
             .map(|cam| cam.id)
             .collect();
+        // A camera that zoomed on air goes back to its framing.
+        for cam in self.reset_cams.clone() {
+            if self.is_on_air_camera(cam) {
+                continue;
+            }
+            self.reset_cams.remove(&cam);
+            let shot = self.aimed(cam, p).and_then(|s| self.setup.shot(s)).cloned();
+            if let Some(shot) = shot.filter(|s| s.preset.is_some() && s.camera == cam) {
+                self.prepared.insert(cam, (shot.id, t));
+                out.push(Decision::Prepare {
+                    camera: cam,
+                    shot: shot.id,
+                    preset: shot.preset.unwrap_or(1),
+                    reason: Reason::Reframe,
+                });
+            }
+        }
         if free.is_empty() {
             return;
         }
@@ -1267,6 +1519,7 @@ mod tests {
         framed: BTreeMap<CamId, ShotId>,
         moving_until: BTreeMap<CamId, (u64, ShotId)>,
         online: BTreeMap<CamId, bool>,
+        subject: BTreeMap<CamId, crate::perception::Framing>,
     }
 
     impl Plateau {
@@ -1283,6 +1536,7 @@ mod tests {
                 framed,
                 moving_until: BTreeMap::new(),
                 online,
+                subject: BTreeMap::new(),
             }
         }
 
@@ -1311,6 +1565,7 @@ mod tests {
                         } else {
                             self.framed.get(&c.id).copied()
                         },
+                        subject: self.subject.get(&c.id).copied(),
                     })
                     .collect(),
                 program: self.program,
@@ -1409,12 +1664,13 @@ mod tests {
         let c = cuts(&run(&Script::demo(), 125, auto));
         assert!(c.len() > 8, "{c:?}");
         for w in c.windows(2) {
-            assert!(
-                w[1].0 - w[0].0 >= Profile::podcast().min_shot_ms,
-                "{:?} then {:?}",
-                w[0],
-                w[1]
-            );
+            // A listening shot is short by design.
+            let min = if matches!(w[1].2, Reason::BackToSpeaker { .. }) {
+                Profile::podcast().reaction_ms
+            } else {
+                Profile::podcast().min_shot_ms
+            };
+            assert!(w[1].0 - w[0].0 >= min, "{:?} then {:?}", w[0], w[1]);
         }
     }
 
@@ -1439,28 +1695,152 @@ mod tests {
     }
 
     #[test]
-    fn a_long_answer_gets_a_cutaway_then_the_speaker_again() {
+    fn a_long_answer_gets_listening_shots_then_the_speaker_again() {
         let c = cuts(&run(&Script::demo(), 90, auto));
-        let away = c
+        let listening: Vec<usize> = c
             .iter()
-            .position(|(t, _, r)| *t > 63_000 && *r == Reason::HeldTooLong)
-            .expect("a cutaway");
-        assert_ne!(kind(c[away].1), ShotKind::Single(SeatId(5)));
-        let back = &c[away + 1];
-        assert!(back.0 < 90_000);
-        assert_eq!(kind(back.1), ShotKind::Single(SeatId(5)));
+            .enumerate()
+            .filter(|(_, (t, _, r))| {
+                *t > 63_000
+                    && matches!(
+                        r,
+                        Reason::Reaction {
+                            speaker: SeatId(5),
+                            ..
+                        }
+                    )
+            })
+            .map(|(i, _)| i)
+            .collect();
+        assert!(listening.len() >= 2, "{c:?}");
+        let p = Profile::podcast();
+        for i in &listening {
+            assert_ne!(kind(c[*i].1), ShotKind::Single(SeatId(5)));
+            let back = &c[i + 1];
+            assert_eq!(back.2, Reason::BackToSpeaker { seat: SeatId(5) });
+            assert_eq!(
+                back.0 - c[*i].0,
+                p.reaction_ms.div_ceil(40) * 40,
+                "a listening shot lasts its time"
+            );
+        }
+        assert_ne!(
+            c[listening[0]].1, c[listening[1]].1,
+            "not the same listener twice in a row"
+        );
     }
 
     #[test]
-    fn a_cut_to_the_person_now_speaking_says_so_even_after_a_long_shot() {
-        // Seat 3 is on air from about 10.7 s; seat 1 speaks at 25 s, when
-        // that shot has been held its maximum.
-        let c = cuts(&run(&Script::demo(), 28, auto));
-        let to_host = c
+    fn wide_shots_come_back_to_breathe() {
+        let c = cuts(&run(&Script::demo(), 125, auto));
+        let wides: Vec<u64> = c
             .iter()
-            .find(|(t, s, _)| *t > 25_000 && kind(*s) == ShotKind::Single(SeatId(1)))
-            .expect("seat 1 shown");
-        assert_eq!(to_host.2, Reason::Speaker { seat: SeatId(1) });
+            .filter(|(_, s, _)| kind(*s) == ShotKind::Wide)
+            .map(|(t, _, _)| *t)
+            .collect();
+        assert!(c.iter().any(|(_, _, r)| *r == Reason::Breathe));
+        let p = Profile::podcast();
+        for w in wides.windows(2) {
+            assert!(
+                w[1] - w[0] <= p.breathe_every_ms + p.max_shot_ms,
+                "{wides:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_close_shot_zooms_slowly_and_is_reframed_off_air() {
+        let log = run(&Script::demo(), 40, auto);
+        let first = log
+            .iter()
+            .find_map(|(t, d)| match d {
+                Decision::Drift { camera, zoom, .. } => Some((*t, *camera, *zoom)),
+                _ => None,
+            })
+            .expect("a slow zoom");
+        assert!(first.2 > 0.0 && first.2 < 0.1, "very slow");
+        let cut_before = log
+            .iter()
+            .rfind(|(t, d)| *t <= first.0 && matches!(d, Decision::Cut { .. }))
+            .unwrap()
+            .0;
+        assert!(first.0 - cut_before >= Profile::podcast().drift_after_ms);
+        assert!(
+            log.iter().any(|(t, d)| *t > first.0 && matches!(d, Decision::Prepare { camera, reason: Reason::Reframe, .. } if *camera == first.1)),
+            "back to its framing once off air"
+        );
+        let vertical = run(&Script::demo(), 40, |_| Control {
+            vertical: true,
+            ..Control::default()
+        });
+        assert!(
+            !vertical
+                .iter()
+                .any(|(_, d)| matches!(d, Decision::Drift { .. })),
+            "no zoom in for 9:16"
+        );
+    }
+
+    #[test]
+    fn the_camera_on_air_follows_the_person() {
+        let follow = |x: f32, vertical: bool| {
+            let mut plateau = Plateau::new();
+            let mut director = Director::new(plateau.setup.clone(), Profile::podcast());
+            let c = Control {
+                vertical,
+                ..Control::default()
+            };
+            let script = Script::demo();
+            let mut out = Vec::new();
+            for t in (0..8000).step_by(40) {
+                // The host leans to the side once on their close shot (Cam 2).
+                if t == 4000 {
+                    plateau
+                        .subject
+                        .insert(CamId(2), crate::perception::Framing { x, y: 0.38 });
+                }
+                let p = plateau.perceive(&script, t);
+                for d in director.tick(&p, &c) {
+                    if let Decision::Follow {
+                        camera, pan, tilt, ..
+                    } = d
+                    {
+                        out.push((t, camera, pan, tilt));
+                    }
+                    plateau.apply(&d, t);
+                }
+            }
+            out
+        };
+        let moved = follow(0.7, false);
+        assert!(!moved.is_empty());
+        assert!(
+            moved.iter().all(|(_, cam, pan, tilt)| *cam == CamId(2)
+                && *pan > 0.0
+                && *pan <= 0.3
+                && *tilt == 0.0),
+            "{moved:?}"
+        );
+        assert!(
+            moved.windows(2).all(|w| w[1].0 - w[0].0 >= 1000),
+            "gently, once a second at most"
+        );
+        assert!(follow(0.56, false).is_empty(), "a small move is left alone");
+        assert!(
+            !follow(0.56, true).is_empty(),
+            "but not in 9:16, where the face must stay centred"
+        );
+    }
+
+    #[test]
+    fn the_host_taking_the_floor_back_breathes_first() {
+        // Seat 3 speaks from 10 s to 24 s; the host takes the floor back at 25 s.
+        let c = cuts(&run(&Script::demo(), 30, auto));
+        let after: Vec<_> = c.iter().filter(|(t, _, _)| *t > 25_000).collect();
+        assert_eq!(after[0].2, Reason::Breathe);
+        assert_eq!(kind(after[0].1), ShotKind::Wide);
+        assert_eq!(kind(after[1].1), ShotKind::Single(SeatId(1)));
+        assert_eq!(after[1].2, Reason::Speaker { seat: SeatId(1) });
     }
 
     #[test]

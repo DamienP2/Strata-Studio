@@ -43,6 +43,9 @@ pub struct SimPtz {
     preset: Option<u8>,
     travel: Duration,
     moving: Option<(Instant, u8)>,
+    /// The last zoom and pan/tilt speeds asked for.
+    pub zoom_speed: f32,
+    pub drive_speed: (f32, f32),
 }
 
 impl SimPtz {
@@ -52,6 +55,8 @@ impl SimPtz {
             preset: Some(preset),
             travel,
             moving: None,
+            zoom_speed: 0.0,
+            drive_speed: (0.0, 0.0),
         }
     }
 }
@@ -62,6 +67,16 @@ impl Ptz for SimPtz {
     }
     fn recall(&mut self, preset: u8) -> Result<()> {
         self.moving = Some((Instant::now() + self.travel, preset));
+        self.zoom_speed = 0.0;
+        self.drive_speed = (0.0, 0.0);
+        Ok(())
+    }
+    fn zoom(&mut self, speed: f32) -> Result<()> {
+        self.zoom_speed = speed;
+        Ok(())
+    }
+    fn drive(&mut self, pan: f32, tilt: f32) -> Result<()> {
+        self.drive_speed = (pan, tilt);
         Ok(())
     }
     fn status(&mut self) -> PtzStatus {

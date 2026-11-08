@@ -77,6 +77,9 @@ struct App {
     listener: Listener,
     heard: Vec<Hint>,
     remote_voice: BTreeMap<RemoteId, bool>,
+    /// Slow movements under way: when to stop them.
+    zoom_until: BTreeMap<CamId, u64>,
+    drive_until: BTreeMap<CamId, u64>,
 }
 
 type Shared = Arc<Mutex<App>>;
@@ -98,6 +101,8 @@ impl App {
             listener: Listener::new(&setup),
             heard: Vec::new(),
             remote_voice: BTreeMap::new(),
+            zoom_until: BTreeMap::new(),
+            drive_until: BTreeMap::new(),
             director: Director::new(setup, profile),
             control: Control::default(),
             switcher: SimSwitcher::new(),
@@ -185,6 +190,7 @@ impl App {
                     online: st.online,
                     moving: st.moving,
                     framed,
+                    subject: None,
                 }
             })
             .collect();
@@ -215,6 +221,23 @@ impl App {
     }
 
     fn tick(&mut self) {
+        let now = self.now();
+        for (cam, until) in self.zoom_until.clone() {
+            if now >= until {
+                self.zoom_until.remove(&cam);
+                if let Some(ptz) = self.ptz.get_mut(&cam) {
+                    let _ = ptz.zoom(0.0);
+                }
+            }
+        }
+        for (cam, until) in self.drive_until.clone() {
+            if now >= until {
+                self.drive_until.remove(&cam);
+                if let Some(ptz) = self.ptz.get_mut(&cam) {
+                    let _ = ptz.drive(0.0, 0.0);
+                }
+            }
+        }
         let p = self.perceive();
         let decisions = self.director.tick(&p, &self.control);
         self.last = p;
@@ -294,6 +317,41 @@ impl App {
             Decision::Preload { program, .. } => {
                 let what = self.composite_label(&program);
                 self.log(format!("prépare en coulisse : {what}{shadow}"), auto);
+            }
+            Decision::Drift {
+                camera,
+                zoom,
+                for_ms,
+                reason,
+            } => {
+                if auto {
+                    let until = self.now() + for_ms;
+                    if let Some(ptz) = self.ptz.get_mut(&camera) {
+                        let _ = ptz.zoom(zoom);
+                        self.zoom_until.insert(camera, until);
+                    }
+                }
+                let why = reason.describe(self.director.setup());
+                self.log(format!("Cam {} : {why}{shadow}", camera.0), auto);
+            }
+            Decision::Follow {
+                camera,
+                pan,
+                tilt,
+                reason,
+            } => {
+                if auto {
+                    let until = self.now() + 400;
+                    if let Some(ptz) = self.ptz.get_mut(&camera) {
+                        let _ = ptz.drive(pan, tilt);
+                        self.drive_until.insert(camera, until);
+                    }
+                }
+                let why = reason.describe(self.director.setup());
+                self.log(
+                    format!("Cam {} : {why} ({pan:+.2}, {tilt:+.2}){shadow}", camera.0),
+                    auto,
+                );
             }
             Decision::Understood { hint } => {
                 self.log(

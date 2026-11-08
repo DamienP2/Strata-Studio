@@ -62,6 +62,17 @@ pub struct CamState {
     /// The shot it is framed on (the preset it last reached); a camera
     /// that does not move is always on its shot.
     pub framed: Option<ShotId>,
+    /// Where the face of the person framed is in the picture, when the
+    /// vision layer sees one.
+    #[serde(default)]
+    pub subject: Option<Framing>,
+}
+
+/// A position in the picture: 0 to 1 from left to right, top to bottom.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Framing {
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Perception {
