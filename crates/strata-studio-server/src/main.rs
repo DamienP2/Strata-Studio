@@ -614,7 +614,17 @@ impl App {
                 .lock()
                 .unwrap()
                 .mics(setup.seats.iter().map(|s| (s.id, s.mic.dante_channel))),
-            None => self.script.mics(setup.seats.iter().map(|s| s.id), t),
+            None => {
+                // The simulated conversation: only the seats taken speak.
+                let mut m = self.script.mics(setup.seats.iter().map(|s| s.id), t);
+                for x in &mut m {
+                    if setup.seat(x.seat).is_none_or(|s| s.guest.is_none()) {
+                        x.voice = false;
+                        x.level_db = -60.0;
+                    }
+                }
+                m
+            }
         };
         let remotes = setup
             .remotes
