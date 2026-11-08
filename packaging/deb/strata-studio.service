@@ -1,0 +1,24 @@
+[Unit]
+Description=Strata Studio, la réalisation automatique du studio
+Documentation=https://github.com/DamienP2/Strata-Studio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=strata-studio
+Group=strata-studio
+EnvironmentFile=/etc/strata-studio/strata-studio.env
+WorkingDirectory=/var/lib/strata-studio
+ExecStart=/usr/bin/strata-studio $STRATA_STUDIO_ARGS
+Restart=on-failure
+RestartSec=3
+# Studio ferme lui-même les fichiers d'un tournage en cours avant de s'arrêter.
+KillMode=mixed
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

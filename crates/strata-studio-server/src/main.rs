@@ -85,7 +85,7 @@ struct Args {
     #[arg(long)]
     whisper: Option<String>,
     /// Where the recordings are written on the server.
-    #[arg(long, default_value = "enregistrements")]
+    #[arg(long, env = "STRATA_STUDIO_REC_DIR", default_value = "enregistrements")]
     rec_dir: String,
     /// The recording settings (codec, acceleration, container, each
     /// channel's ffmpeg input), as JSON; else the simulated studio's.
@@ -1049,10 +1049,33 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("écoute sur {}", args.listen))?;
     tracing::info!("Strata Studio sur http://{}", args.listen);
+    let at_end = app.clone();
     axum::serve(listener, router(app))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(stop_signal())
         .await?;
+    // Stopped by systemd or Ctrl-C during a shoot: close the files properly.
+    let mut app = at_end.lock().unwrap();
+    if let Some(desk) = app.desk.as_mut() {
+        if desk.stop().is_ok() {
+            tracing::info!("enregistrement arrêté à l'arrêt du serveur");
+        }
+    }
     Ok(())
+}
+
+/// Ctrl-C, or SIGTERM (what systemd sends to stop the service).
+async fn stop_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("signal SIGTERM");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }

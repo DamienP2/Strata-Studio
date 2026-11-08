@@ -1,0 +1,42 @@
+# Une étiquette vX.Y.Z publie la release Ubuntu : le paquet .deb, une archive
+# des exécutables et leurs sommes SHA-256. Construit sur Ubuntu 22.04 pour
+# s'installer sur 22.04 et 24.04.
+name: Release Ubuntu
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: ffmpeg pour les essais d'enregistrement
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Essais
+        run: cargo test --workspace --locked
+      - name: Paquet
+        run: packaging/build-deb.sh "${GITHUB_REF_NAME#v}"
+      - name: Le paquet s'installe et le service démarre
+        run: |
+          sudo apt-get install -y ./dist/strata-studio_*_amd64.deb
+          for i in $(seq 1 30); do curl -sf localhost:8095/api/health && break; sleep 1; done
+          systemctl is-active strata-studio
+          curl -sf localhost:8095/api/health
+      - uses: actions/upload-artifact@v4
+        with:
+          name: strata-studio-ubuntu
+          path: dist/*
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

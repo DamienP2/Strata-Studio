@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    if ! getent passwd strata-studio >/dev/null; then
+        useradd --system --user-group --home-dir /var/lib/strata-studio --no-create-home \
+            --shell /usr/sbin/nologin --comment "Strata Studio" strata-studio
+    fi
+    # Les cartes NVIDIA et Intel encodent pour les membres de ces groupes.
+    for g in video render; do
+        if getent group "$g" >/dev/null; then usermod -a -G "$g" strata-studio; fi
+    done
+    install -d -o strata-studio -g strata-studio -m 0750 /var/lib/strata-studio /var/lib/strata-studio/enregistrements
+fi
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null || true
+    if [ -z "$2" ]; then
+        systemctl enable --now strata-studio.service >/dev/null || true
+    else
+        systemctl try-restart strata-studio.service >/dev/null || true
+    fi
+fi
+exit 0

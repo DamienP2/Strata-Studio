@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null || true
+fi
+# Les tournages dans /var/lib/strata-studio sont gardés, même à la purge.
+exit 0

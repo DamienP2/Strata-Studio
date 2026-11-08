@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+if [ -d /run/systemd/system ] && [ "$1" = "remove" ]; then
+    systemctl disable --now strata-studio.service >/dev/null || true
+fi
+exit 0
