@@ -61,6 +61,10 @@ pub struct Encoder {
     /// More ffmpeg options, after the encoder's.
     #[serde(default)]
     pub extra: Vec<String>,
+    /// A picture size other than the resolution's (a light studio for
+    /// trying Studio without encoder).
+    #[serde(default)]
+    pub size: Option<(u32, u32)>,
 }
 
 impl Encoder {
@@ -71,7 +75,13 @@ impl Encoder {
             resolution,
             pix_fmt: None,
             extra: vec![],
+            size: None,
         }
+    }
+
+    /// The picture's size.
+    pub fn frame_size(&self) -> (u32, u32) {
+        self.size.unwrap_or_else(|| self.resolution.size())
     }
 
     /// The ffmpeg output options (video), and the pixel format.

@@ -76,7 +76,7 @@ impl RecordRequest {
 }
 
 /// The studio's settings for recording (set in the administration).
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordSettings {
     pub codec: Codec,
@@ -84,6 +84,10 @@ pub struct RecordSettings {
     pub container: Container,
     /// Each channel's ffmpeg input (DeckLink, NDI through a gateway, SRT…).
     pub channels: Vec<Channel>,
+    /// Small pictures, quickly encoded: the simulated studio, on a
+    /// machine without encoder.
+    #[serde(default)]
+    pub light: bool,
 }
 
 impl RecordSettings {
@@ -104,6 +108,7 @@ impl RecordSettings {
                 .into_iter()
                 .map(gen)
                 .collect(),
+            light: true,
         }
     }
 }
@@ -147,6 +152,8 @@ pub struct Desk {
     pub mic_stream: Option<(usize, u32)>,
     current: Option<Current>,
     after: Arc<Mutex<AfterState>>,
+    /// The files of the last recording (on the server).
+    pub last_files: Vec<PathBuf>,
 }
 
 /// Today's date, `YYYY-MM-DD` (UTC).
@@ -156,7 +163,12 @@ pub fn today() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0)
         / 86400) as i64;
-    // Civil date from days since 1970-01-01 (H. Hinnant's algorithm).
+    date_of(days)
+}
+
+/// The calendar date of a day counted from 1970-01-01 (H. Hinnant's
+/// algorithm).
+pub fn date_of(days: i64) -> String {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;
@@ -202,11 +214,20 @@ impl Desk {
             mic_stream,
             current: None,
             after: Arc::new(Mutex::new(AfterState::default())),
+            last_files: vec![],
         }
     }
 
     fn encoder(&self, resolution: Resolution) -> Encoder {
-        Encoder::new(self.settings.codec, self.settings.accel, resolution)
+        let mut e = Encoder::new(self.settings.codec, self.settings.accel, resolution);
+        if self.settings.light {
+            e.size = Some((640, 360));
+            e.extra = ["-preset", "ultrafast", "-b:v", "2M"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+        }
+        e
     }
 
     /// Hours that can still be recorded with these answers.
@@ -321,6 +342,7 @@ impl Desk {
         if let Some(m) = mics {
             files.extend(m.finish().map_err(|e| e.to_string())?);
         }
+        self.last_files = files.clone();
         let summary = videos
             .iter()
             .map(|(n, _, s)| (n.clone(), s.clone()))

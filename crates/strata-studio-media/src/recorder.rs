@@ -95,7 +95,7 @@ pub fn command(
     out: &Path,
 ) -> Result<Command> {
     let (video, pix) = enc.args()?;
-    let (w, h) = enc.resolution.size();
+    let (w, h) = enc.frame_size();
     let mut c = Command::new(ffmpeg);
     c.args(["-hide_banner", "-nostats", "-loglevel", "error", "-y"])
         .args(&channel.input)

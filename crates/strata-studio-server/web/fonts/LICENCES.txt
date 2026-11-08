@@ -1,0 +1,7 @@
+Polices embarquées (sous-ensemble latin, fichiers woff2 de Google Fonts),
+toutes sous licence SIL Open Font License 1.1 (https://openfontlicense.org) :
+
+- Bricolage Grotesque : Copyright 2022 The Bricolage Grotesque Project Authors
+- Inter : Copyright 2020 The Inter Project Authors
+- JetBrains Mono : Copyright 2020 The JetBrains Mono Project Authors
+- Manrope : Copyright 2018 The Manrope Project Authors
