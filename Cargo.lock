@@ -561,6 +561,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "strata-studio-bench"
+version = "0.1.0"
+
+[[package]]
 name = "strata-studio-core"
 version = "0.1.0"
 dependencies = [

@@ -56,7 +56,10 @@ Jusqu'ici Studio ne faisait que piloter. **L'enregistrement et une partie de la 
 
 - **Entrée des images** : SDI (DeckLink), NDI et ST 2110 ; chaque source se déclare dans son format.
 - **PGM et CLEAN** : deux sorties du mélangeur arrivent au serveur. Sur un ATEM, le PGM sort sur sa sortie programme et le CLEAN sur une sortie auxiliaire réglée en *clean feed* (le programme sans les incrustations). Sur vMix, deux sorties (SDI ou NDI) : le programme, et le programme sans les overlays. **Quelle sortie porte quoi se règle dans les paramètres, côté administration**, pour l'ATEM comme pour vMix.
-- **Encodage** : 6 canaux 4:2:2 en temps réel, plus YouTube et TikTok. En 2160p50, c'est lourd. Les cartes NVIDIA de génération Blackwell encodent le H.264 et le H.265 en 4:2:2 en matériel ; la même carte sert l'IA. **Le nombre de canaux tenus en 2160p50 sera mesuré sur la machine retenue**, c'est le premier risque du projet.
+- **Encodage** : 6 canaux 4:2:2 en temps réel, plus YouTube et TikTok. En 2160p50, c'est lourd. Les cartes NVIDIA de génération Blackwell encodent le H.264 et le H.265 en 4:2:2 en matériel ; la même carte sert l'IA. **Le nombre de canaux tenus en 2160p50 sera mesuré sur la machine retenue**, c'est le premier risque du projet. L'outil `banc-encodage` du dépôt le mesure. Premiers constats :
+  - **sans carte**, un conteneur à 4 processeurs ne tient qu'**un canal** H.264 4:2:2 10 bits en 1080p50 : l'encodage matériel est indispensable ;
+  - le **FFmpeg 6.1** des distributions courantes n'offre **pas le 4:2:2 sur NVENC** : avec une carte Blackwell, il faut un FFmpeg récent ;
+  - **Intel Quick Sync** encode le **H.265 4:2:2 10 bits** (pas le H.264 4:2:2) : c'est une alternative à mesurer.
 - **Plateforme GO** : chaque GO est un **encodeur Blackmagic Web Encoder 4K**. Studio lit par son API s'il diffuse déjà : un GO en service est **grisé** sur la tablette. Pour le GO choisi, Studio route le PGM vers son entrée par le Videohub, puis **lance la diffusion au lancement du tournage et l'arrête à la fin**, par la même API.
 - **YouTube et TikTok** : encodés par le serveur ; TikTok reçoit le PGM découpé en 9:16, en direct.
 - **Stockage** : l'enregistrement se fait sur les disques du serveur, puis Studio **copie** vers le partage SMB choisi, rangé par programme et par date.

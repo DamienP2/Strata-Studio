@@ -59,6 +59,7 @@ Le journal (`/api/state`) montre l'intention comprise, le 50/50 préparé puis p
 | `strata-studio-core` | le studio (places, caméras, plans, sources extérieures), la perception, les profils, le **Réalisateur** (fonction pure, testée sur des conversations scriptées) et l'**écoute** de l'animateur (des intentions tirées de ses phrases) |
 | `strata-studio-devices` | les interfaces des appareils (mélangeur, nodal, PTZ, console, Bitfocus), leurs simulateurs, la console Midas M32 (OSC) et les caméras Sony en VISCA over IP |
 | `strata-studio-sense` | l'oreille de l'animateur : son micro découpé en phrases, transcrites par un serveur whisper.cpp local, sans les textes que Whisper invente dans le silence ; l'exemple `ecoute` l'essaie sur un enregistrement |
+| `strata-studio-bench` | `banc-encodage` : combien de canaux 4:2:2 (H.264, H.265 ; 1080p50, 2160p50) la machine encode en temps réel |
 | `strata-studio-server` | l'exécutable `strata-studio` : studio simulé, API d'état et de reprise en main |
 
 ```bash
@@ -84,3 +85,13 @@ cargo run -p strata-studio-sense --example ecoute -- enregistrement.wav
 ```
 
 Chaque phrase entendue s'affiche, avec ce que le Réalisateur en comprend.
+
+## Mesurer l'encodage de la machine
+
+Combien de canaux 4:2:2 la machine tient en temps réel (à lancer sur le serveur retenu) :
+
+```bash
+cargo run --release -p strata-studio-bench -- --res 2160 --codec h265 --accel nvenc --max 8
+```
+
+`--accel` : `cpu`, `nvenc` (NVIDIA ; le 4:2:2 demande une carte Blackwell et un FFmpeg récent) ou `qsv` (Intel, H.265 4:2:2 10 bits). Le verdict dit combien de canaux tiennent avec 10 % de marge ; Studio en demande jusqu'à 6, plus la diffusion.
