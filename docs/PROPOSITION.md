@@ -1,5 +1,7 @@
 # Strata Studio : proposition (v5)
 
+> **Le périmètre de référence est désormais [`FONCTIONNALITES.md`](FONCTIONNALITES.md)** (enregistrement et diffusion sur le serveur, parcours de la tablette en 14 étapes, écran du studio). Ce document garde l'architecture de contrôle et de l'IA.
+>
 > Statut : **proposition**. Le Réalisateur (règles, décisions, reprise en main) et le studio simulé existent ; les pilotes réels sont à écrire, sauf la console Midas M32.
 
 **Strata Studio** rend un studio de podcast ou de radio filmée **autonome**. Son cœur est une **IA locale de réalisation et de mixage** : elle commute le mélangeur, cadre les caméras PTZ et, si besoin, tient le mélange des micros. Un journaliste suit et contrôle son émission depuis une **tablette en Wi-Fi**, étape par étape. Il n'y a pas de réalisateur ; quelqu'un peut **reprendre la main directement sur le mélangeur ou sur la console**.
