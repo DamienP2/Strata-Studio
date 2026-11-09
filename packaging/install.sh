@@ -182,14 +182,19 @@ systemd_up() { [ -d /run/systemd/system ]; }
 # ---------- 1. the machine ----------
 
 step "La machine"
-. /etc/os-release
-case "${VERSION_ID:-}" in
-    22.04|24.04) say "Ubuntu ${VERSION_ID} : pris en charge." ;;
-    *) say "Ubuntu ${VERSION_ID:-?} : non testé (22.04 et 24.04 le sont). On continue." ;;
+# Read in a subshell: /etc/os-release defines VERSION, NAME… of its own.
+OS_VERSION=$(. /etc/os-release && echo "${VERSION_ID:-}")
+case "$OS_VERSION" in
+    22.04|24.04) say "Ubuntu $OS_VERSION : pris en charge." ;;
+    *) say "Ubuntu ${OS_VERSION:-?} : non testé (22.04 et 24.04 le sont). On continue." ;;
 esac
 [ "$(dpkg --print-architecture)" = amd64 ] || fail "seule l'architecture amd64 est fournie"
 FREE=$(df -Pk /var/lib | awk 'NR==2 {print int($4/1024/1024)}')
 say "Place libre pour les tournages : ${FREE} Go (/var/lib)."
+if [ "$FREE" -lt 100 ]; then
+    # 6 channels in 1080p50 take about 135 Go an hour, before the copy.
+    say "Attention : c'est peu. Une heure en 6 canaux 1080p50 prend environ 135 Go ; prévoyez un disque dédié aux tournages."
+fi
 
 # ---------- 2. the packages ----------
 

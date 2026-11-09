@@ -55,3 +55,11 @@ jobs:
           name: Strata Studio ${{ env.V }}
           files: dist/*
           generate_release_notes: true
+      - name: L'installateur de la release télécharge et installe ce qu'elle publie
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        run: |
+          curl -fsSL -o /tmp/install.sh "https://github.com/${{ github.repository }}/releases/download/v$V/install.sh"
+          sudo bash /tmp/install.sh --yes --version "$V"
+          dpkg -s strata-studio | grep -q "Version: $V"
+          for i in $(seq 1 30); do curl -sf localhost:8095/api/health && break; sleep 1; done
+          curl -sf localhost:8095/api/health
