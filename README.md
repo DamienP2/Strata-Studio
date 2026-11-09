@@ -17,41 +17,27 @@ Studio enregistre jusqu'à 6 canaux en 4:2:2 et un WAV par micro, fabrique les v
 
 Strata Studio fait partie de la galaxie Strata, avec Strata Graphics et Strata Multiview.
 
-> **État.** Tout le parcours fonctionne de bout en bout sur un studio simulé, sans matériel. Les pilotes suivent la documentation de chaque constructeur, mais **n'ont pas encore été essayés sur le vrai matériel**. La liste est en bas de page, à la section [À valider sur le matériel](#à-valider-sur-le-matériel). Les fonctionnalités sont décrites dans [`docs/FONCTIONNALITES.md`](docs/FONCTIONNALITES.md).
+> **État.** Studio pilote les vrais appareils qu'on lui règle ; il ne simule rien. Un appareil non réglé est signalé « non réglé », et un appareil qui ne répond pas, « ne répond pas ». Tout le parcours a été essayé de bout en bout contre des appareils qui parlent les vrais protocoles (vMix, caméras VISCA, M32, Buttons), mais **pas encore sur le vrai matériel**. La liste est en bas de page, à la section [À valider sur le matériel](#à-valider-sur-le-matériel). Les fonctionnalités sont décrites dans [`docs/FONCTIONNALITES.md`](docs/FONCTIONNALITES.md).
 
 ## Aperçu
 
-**Le tournage au téléphone** : l'accueil, la vérification du studio, le placement, les tests un par un, le tournage.
+Les captures viennent du programme, réglé sur un vMix, quatre caméras VISCA, une M32 et Buttons.
+
+**Le tournage au téléphone** : l'accueil, la vérification des appareils (chacun interrogé), les tests (sans micros Dante, on valide à l'oreille), le tournage, la fin.
 
 ![Le tournage au téléphone](docs/captures/telephone.png)
 
-**Sur l'iPad**, le même parcours, avec les étapes et les réponses à gauche :
+**L'administration** s'ouvre sur l'état du studio : chaque appareil, ce qu'il répond, ce qui reste à régler.
 
-![Le tournage sur l'iPad](docs/captures/ipad.png)
+![L'état du studio](docs/captures/admin-etat.png)
 
-**L'écran du studio** pendant les tests : l'image de la caméra testée, la zone 9:16, le vumètre et la consigne.
+Chaque appareil a sa page. Ici les plans des caméras : cadrer, puis « Garder ce cadre ».
 
-![L'écran du studio](docs/captures/ecran-studio.png)
+![Les plans des caméras](docs/captures/admin-plans.png)
 
-**Le Stream Deck +**, ici dans sa version à l'écran (`/deck`). Le vrai passe par Bitfocus Buttons.
-
-![Le Stream Deck](docs/captures/stream-deck.png)
-
-**Un tournage** : la frise des plans, qui parle, ce que l'IA a décidé, les fichiers et les exports de montage (EDL, Final Cut / Resolve, Premiere, OTIO).
+**Un tournage** : la frise des plans, ce que l'IA a décidé, les fichiers et les exports de montage.
 
 ![Un tournage](docs/captures/web-tournage.png)
-
-**Le direct**, en lecture seule, avec les boutons pour reprendre ou rendre la main :
-
-![Le direct](docs/captures/web-direct.png)
-
-**L'administration.** Les automations en nœuds, reliées aux appareils et à Buttons :
-
-![Le studio en nœuds](docs/captures/admin-studio.png)
-
-Le réglage de l'IA, essayé en rejouant un tournage passé :
-
-![La réalisation par l'IA](docs/captures/admin-realisation.png)
 
 ## Installer sur Ubuntu
 
@@ -67,7 +53,7 @@ curl -fsSLO https://github.com/DamienP2/Strata-Studio/releases/latest/download/i
 sudo bash install.sh
 ```
 
-L'installateur pose ses questions dans des fenêtres. Une adresse laissée vide laisse l'appareil simulé : on peut tout essayer sans matériel, puis brancher les appareils un par un. Il déroule 14 étapes :
+L'installateur pose ses questions dans des fenêtres. Ce qu'on laisse vide (« Plus tard ») reste non réglé et se règle ensuite dans l'administration. Il déroule 14 étapes :
 
 1. **La machine** : la version d'Ubuntu, la place libre.
 2. **Les paquets** : ffmpeg, cifs-utils (partages SMB), python3, curl, whiptail, et la mise à jour du système si on la demande.
@@ -86,7 +72,7 @@ L'installateur pose ses questions dans des fenêtres. Une adresse laissée vide 
 
 On peut relancer l'installateur quand on veut : il reprend les réglages en place. Pour l'automatiser :
 
-- `--yes` répond tout par défaut et installe un studio simulé ;
+- `--yes` installe Studio sans poser de question ; les appareils se règlent ensuite dans l'administration ;
 - `--answers fichier` lit les réponses dans un fichier `cle=valeur` (les clés figurent dans `packaging/install.sh`).
 
 Le journal de l'installation est dans `/var/log/strata-studio-install.log`.
@@ -111,13 +97,11 @@ Depuis n'importe quel appareil du réseau de la régie (`<serveur>` est l'adress
 | --- | --- |
 | `http://<serveur>:8095/` | le journaliste : le parcours, sur la tablette ou le téléphone (à ajouter à l'écran d'accueil) |
 | `http://<serveur>:8095/ecran` | l'écran du plateau |
-| `http://<serveur>:8095/deck` | un Stream Deck à l'écran, pour essayer sans le vrai |
+| `http://<serveur>:8095/deck` | le Stream Deck à l'écran (les mêmes touches que le vrai) |
 | `http://<serveur>:8095/tournages` | les tournages, leurs fichiers et leurs exports de montage |
 | `http://<serveur>:8095/direct` | suivre le direct, reprendre ou rendre la main |
 | `http://<serveur>:8095/programmes` | les émissions et leurs réglages |
-| `http://<serveur>:8095/admin/systeme` | les appareils (page Système) |
-| `http://<serveur>:8095/admin/studio` | les automations en nœuds |
-| `http://<serveur>:8095/admin/realisation` | le réglage de l'IA |
+| `http://<serveur>:8095/admin` | l'administration : l'état de chaque appareil, et une page pour régler chacun |
 
 Les pages, les polices et les bibliothèques sont dans le serveur : rien n'est chargé depuis Internet au studio.
 
@@ -159,21 +143,28 @@ Pour désinstaller (les tournages restent dans `/var/lib/strata-studio`) :
 sudo apt remove strata-studio
 ```
 
-## Essayer sans installer
+## Régler le studio
 
-Avec Rust (par [rustup](https://rustup.rs)) et ffmpeg :
+Ouvrez `http://<serveur>:8095/admin`. La page **État du studio** interroge chaque appareil et dit, pour chacun : **répond**, **à vérifier**, **ne répond pas** ou **non réglé**. Chaque appareil a sa page dans la colonne de gauche, avec une explication et un formulaire court. « Enregistrer et appliquer » enregistre, redémarre Studio si un appareil a changé, puis vérifie à nouveau.
+
+Dans l'ordre :
+
+1. **Mélangeur** : ATEM ou vMix, et son adresse. C'est le seul appareil indispensable pour tourner.
+2. **Caméras** : l'adresse de chaque caméra et son entrée sur le mélangeur. Les boutons « Allumer » et « Veille » permettent de vérifier tout de suite.
+3. **Plans des caméras** : pour chaque plan (large, chaque place), cadrez la caméra, puis « Garder ce cadre » enregistre le preset ; « Voir » le rappelle.
+4. **Console et micros** : la console, le flux Dante (fichier SDP exporté depuis Dante Controller), et la tranche et le canal de chaque place. Sans les micros, l'IA ne sait pas qui parle et garde le plan large ; les tests se font alors à l'oreille.
+5. **Images reçues** : d'où arrivent le PGM, le CLEAN et chaque caméra (SRT, RTP ou DeckLink), pour enregistrer et diffuser.
+6. Selon le studio : **Nodal**, **Lumière et Stream Deck**, **Diffusion**, **Calls**, **Partages**.
+
+L'IA ne touche au studio que pendant un tournage. Hors tournage, rien n'est envoyé au mélangeur, aux caméras ni à la console.
+
+Pour lancer Studio depuis les sources, avec Rust (par [rustup](https://rustup.rs)) et ffmpeg :
 
 ```bash
 cargo run -p strata-studio-server -- --data ./donnees
 ```
 
-Ouvrez `http://localhost:8095/`. Studio tourne alors sur un **studio simulé** :
-
-- 5 places et 4 caméras PTZ ;
-- un mélangeur, une console et des GO, dont GO2 déjà en service ;
-- une conversation de démonstration.
-
-Les enregistrements sont faits d'images de test légères. Les options de la ligne de commande passent avant les réglages, par exemple `--atem 192.168.10.2`, `--console m32:192.168.10.4` ou `--buttons 192.168.10.5:8000` (voir `strata-studio --help`).
+Les options de la ligne de commande passent avant les réglages, par exemple `--atem 192.168.10.2`, `--console m32:192.168.10.4` ou `--buttons 192.168.10.5:8000` (voir `strata-studio --help`).
 
 ## L'API
 
@@ -202,7 +193,7 @@ Les pages utilisent la même API que le Stream Deck et les automations.
 | Crate | Rôle |
 | --- | --- |
 | `strata-studio-core` | le studio, la perception, les profils, le **Réalisateur** (une fonction pure, testée sur des conversations écrites) et l'**écoute** de l'animateur |
-| `strata-studio-devices` | les appareils et leurs simulateurs : ATEM (UDP 9910), vMix (TCP 8099), Videohub, NMOS IS-05, NDI (runtime chargé au démarrage), caméras VISCA, M32 (OSC), DM5 (RCP), Bitfocus Buttons, Blackmagic Streaming Encoder (REST), Quicklink (REST v1.5) |
+| `strata-studio-devices` | les appareils (un appareil non réglé est « absent » ; des simulateurs servent aux seuls tests) : ATEM (UDP 9910), vMix (TCP 8099), Videohub, NMOS IS-05, NDI (runtime chargé au démarrage), caméras VISCA, M32 (OSC), DM5 (RCP), Bitfocus Buttons, Blackmagic Streaming Encoder (REST), Quicklink (REST v1.5) |
 | `strata-studio-sense` | les micros en AES67 et qui parle ; l'oreille de l'animateur avec whisper.cpp |
 | `strata-studio-media` | l'enregistrement 4:2:2, les WAV, le 9:16, la copie, YouTube et TikTok, les aperçus, les exports de montage |
 | `strata-studio-bench` | `banc-encodage` |
@@ -231,7 +222,7 @@ Il passe les essais, construit le paquet sur Ubuntu 22.04, l'installe, vérifie 
 
 ## À valider sur le matériel
 
-Le code suit la documentation de chaque constructeur, mais ces points n'ont été essayés que contre des simulateurs :
+Le code suit la documentation de chaque constructeur, mais ces points n'ont été essayés que contre de faux appareils parlant leurs protocoles :
 
 - la SuperSource de l'ATEM (50/50, vignette) et les mises en page de vMix ;
 - la console DM5 (RCP), l'API HTTP de Bitfocus Buttons et les variables du Stream Deck ;

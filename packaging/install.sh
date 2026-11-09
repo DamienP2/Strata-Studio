@@ -5,7 +5,8 @@
 #   sudo bash install.sh
 #
 # Options :
-#   --yes            tout par défaut, sans question (un studio simulé)
+#   --yes            sans question : Studio installé, les appareils à régler
+#                    ensuite dans l'administration (http://<serveur>:8095/admin)
 #   --answers FICHIER  les réponses dans un fichier (CLE=valeur), sans question
 #   --deb FICHIER    installer ce paquet plutôt que celui de la dernière release
 #   --version X.Y.Z  installer cette release
@@ -211,7 +212,7 @@ if [ "$(yesno upgrade "Mettre aussi à jour tout le système (apt full-upgrade) 
 fi
 info "Bienvenue dans l'installation de Strata Studio.
 
-Les questions qui suivent règlent le studio : mélangeur, console, caméras, nodal, micros, diffusion, partages. Une adresse laissée vide laisse l'appareil simulé : on peut tout essayer sans matériel, et tout changer plus tard dans l'administration (page Système)."
+Les questions qui suivent règlent le studio : mélangeur, console, caméras, nodal, micros, diffusion, partages. Ce que vous laissez vide reste « non réglé » : Studio le dit, et vous le réglez plus tard dans l'administration (http://<serveur>:8095/admin). Studio ne simule aucun appareil."
 
 # ---------- 3. Strata Studio ----------
 
@@ -235,11 +236,9 @@ fi
 run apt-get install -y "$(readlink -f "$DEB")" || fail "installation du paquet (voir $LOG)"
 grep -q '^STRATA_STUDIO_DATA=' "$ETC/strata-studio.env" 2>/dev/null || echo "STRATA_STUDIO_DATA=$DATA" >> "$ETC/strata-studio.env"
 say "Strata Studio est installé."
-if [ ! -f "$SETTINGS" ]; then
-    # The first start writes the default settings.
-    install -d -o strata-studio -g strata-studio "$DATA"
-    (cd "$DATA" && runuser -u strata-studio -- timeout 3 /usr/bin/strata-studio --data "$DATA" --listen 127.0.0.1:0 >> "$LOG" 2>&1 || true)
-fi
+# A first start writes the settings, or brings older ones up to date.
+install -d -o strata-studio -g strata-studio "$DATA"
+(cd "$DATA" && runuser -u strata-studio -- timeout 3 /usr/bin/strata-studio --data "$DATA" --listen 127.0.0.1:0 >> "$LOG" 2>&1 || true)
 [ -f "$SETTINGS" ] || fail "les réglages par défaut n'ont pas été créés (voir $LOG)"
 systemd_up && systemctl stop strata-studio >> "$LOG" 2>&1 || true
 
@@ -252,23 +251,26 @@ setting studio "$(js "$NAME")"
 # ---------- 5. switcher and console ----------
 
 step "Le mélangeur et la console"
-SW=$(choose switcher "Le mélangeur :" "$(current switcher.kind)" sim "Simulé (pour essayer)" atem "Blackmagic ATEM" vmix "vMix")
+SW=$(choose switcher "Le mélangeur :" "$(k=$(current switcher.kind); echo "${k:-later}")" later "Plus tard" atem "Blackmagic ATEM" vmix "vMix")
+[ "$SW" = later ] && SW=""
 setting switcher.kind "$(js "$SW")"
-if [ "$SW" != sim ]; then
+if [ -n "$SW" ]; then
     setting switcher.address "$(js "$(ask switcher_address "Adresse IP du mélangeur :" "$(current switcher.address)")")"
 fi
 if [ "$SW" = vmix ]; then
     setting switcher.vmixSplit "$(ask vmix_split "vMix : numéro de l'entrée de mise en page « 50/50 » (deux couches) :" "$(current switcher.vmixSplit)")"
     setting switcher.vmixPip "$(ask vmix_pip "vMix : numéro de l'entrée de mise en page « vignette » :" "$(current switcher.vmixPip)")"
 fi
-CO=$(choose console "La console audio :" "$(current console.kind)" sim "Simulée" m32 "Midas M32" dm5 "Yamaha DM5")
+CO=$(choose console "La console audio :" "$(k=$(current console.kind); echo "${k:-later}")" later "Plus tard" m32 "Midas M32" dm5 "Yamaha DM5")
+[ "$CO" = later ] && CO=""
 setting console.kind "$(js "$CO")"
-[ "$CO" != sim ] && setting console.address "$(js "$(ask console_address "Adresse IP de la console :" "$(current console.address)")")"
+[ -n "$CO" ] && setting console.address "$(js "$(ask console_address "Adresse IP de la console :" "$(current console.address)")")"
 
 # ---------- 6. cameras ----------
 
 step "Les caméras"
-CAM=$(choose cameras "Le pilotage des caméras PTZ (Sony FR7, BRC-AM7) :" "$(current cameras.control)" sim "Simulé" visca "VISCA over IP")
+CAM=$(choose cameras "Le pilotage des caméras PTZ (Sony FR7, BRC-AM7) :" "$(k=$(current cameras.control); echo "${k:-later}")" later "Plus tard" visca "VISCA over IP")
+[ "$CAM" = later ] && CAM=""
 setting cameras.control "$(js "$CAM")"
 if [ "$CAM" = visca ]; then
     for i in 0 1 2 3; do
@@ -280,10 +282,10 @@ fi
 # ---------- 7. nodal ----------
 
 step "Le nodal"
-RT=$(choose router "Le nodal vidéo :" "$(current router.kind)" sim "Simulé" videohub "Blackmagic Videohub (SDI)" nmos "NMOS IS-05 (ST 2110)" ndi "NDI (Studio route lui-même)")
+RT=$(choose router "Le nodal vidéo :" "$(current router.kind)" none "Pas de nodal" videohub "Blackmagic Videohub (SDI)" nmos "NMOS IS-05 (ST 2110)" ndi "NDI (Studio route lui-même)")
 setting router.kind "$(js "$RT")"
 [ "$RT" = videohub ] && setting router.address "$(js "$(ask videohub "Adresse IP du Videohub :" "$(current router.address)")")"
-[ "$RT" != sim ] && setting router.pgmSource "$(js "$(ask pgm_source "Le nom de la source qui porte le programme du mélangeur :" "$(current router.pgmSource)")")"
+[ "$RT" != none ] && setting router.pgmSource "$(js "$(ask pgm_source "Le nom de la source qui porte le programme du mélangeur :" "$(current router.pgmSource)")")"
 if [ "$RT" = nmos ]; then
     info "NMOS IS-05 : déclarez les émetteurs et les récepteurs (nom, adresse de l'API Connection, identifiant) dans $SETTINGS, rubrique « router ». L'administration les affiche ensuite."
 fi
@@ -312,7 +314,7 @@ fi
 # ---------- 8. microphones and listening ----------
 
 step "Les micros et l'écoute de l'animateur"
-SDP=$(ask aes67_sdp "Le fichier SDP du flux AES67 des micros (Dante), vide pour une conversation simulée :" "$(current audio.sdp)")
+SDP=$(ask aes67_sdp "Le fichier SDP du flux AES67 des micros (Dante), vide : plus tard :" "$(current audio.sdp)")
 setting audio.sdp "$(js "$SDP")"
 if [ -n "$SDP" ]; then
     IFACES=$(ip -o -4 addr show | awk '{print $2 " " $4}' | tr '\n' ' ')
@@ -347,7 +349,7 @@ fi
 # ---------- 9. Buttons and the Stream Deck ----------
 
 step "Bitfocus Buttons et le Stream Deck"
-BT=$(ask buttons "L'adresse de Bitfocus Buttons (adresse:port, vide si simulé) :" "$(current buttons.address)")
+BT=$(ask buttons "L'adresse de Bitfocus Buttons (adresse:port, vide : plus tard) :" "$(current buttons.address)")
 setting buttons.address "$(js "$BT")"
 if [ -n "$BT" ]; then
     [ "$(yesno deck "Piloter aussi le parcours depuis un Stream Deck + branché sur Buttons ?" oui)" = oui ] && setting buttons.deck true || setting buttons.deck false
@@ -356,9 +358,8 @@ fi
 # ---------- 10. the pictures ----------
 
 step "Les images reçues (enregistrement, aperçus, diffusion)"
-SRC=$(choose sources "D'où viennent les images du mélangeur et des caméras ?" sim sim "Images de test (pour essayer)" srt "SRT ou RTP (adresses réseau)" decklink "Cartes DeckLink (ffmpeg compilé avec DeckLink)")
-if [ "$SRC" != sim ]; then
-    setting recording.light false
+SRC=$(choose sources "D'où viennent les images du mélangeur et des caméras ?" later later "Plus tard" srt "SRT ou RTP (adresses réseau)" decklink "Cartes DeckLink (ffmpeg compilé avec DeckLink)")
+if [ "$SRC" != later ]; then
     if [ "$SRC" = decklink ]; then
         FF=$(ask ffmpeg "Le chemin d'un ffmpeg compilé avec DeckLink (celui d'Ubuntu ne l'a pas) :" "/usr/local/bin/ffmpeg")
         sed -i "s|^STRATA_STUDIO_ARGS=.*|STRATA_STUDIO_ARGS=--ffmpeg $FF|" "$ETC/strata-studio.env"
@@ -408,18 +409,19 @@ say "Mesurer ce que la machine tient : banc-encodage --res 2160 --codec h265 --a
 # ---------- 12. live streaming ----------
 
 step "La diffusion"
-for i in 0 1 2 3; do
-    a=$(ask "go$((i + 1))" "Adresse du Blackmagic Streaming Encoder de GO$((i + 1)) (vide : simulé) :" "$(current gos.$i.address)")
-    setting "gos.$i.address" "$(js "$a")"
-    [ -n "$a" ] && setting "gos.$i.simBusy" false
+GOS="[]"
+for i in 1 2 3 4; do
+    a=$(ask "go$i" "Adresse du Blackmagic Streaming Encoder de GO$i (vide : pas de GO$i) :" "$(current gos.$((i - 1)).address)")
+    [ -n "$a" ] && GOS=$(python3 -c 'import json,sys; l=json.loads(sys.argv[1]); l.append({"label": "GO"+sys.argv[2], "address": sys.argv[3], "destination": "GO"+sys.argv[2]}); print(json.dumps(l))' "$GOS" "$i" "$a")
 done
+setting gos "$GOS"
 YK=$(secret youtube_key "La clé de diffusion YouTube (vide : plus tard) :")
 [ -n "$YK" ] && setting live.youtube.key "$(js "$YK")"
 TU=$(ask tiktok_url "Le serveur de diffusion TikTok (rtmp://…, vide : plus tard) :" "$(current live.tiktok.url)")
 setting live.tiktok.url "$(js "$TU")"
 TK=$(secret tiktok_key "La clé de diffusion TikTok (vide : plus tard) :")
 [ -n "$TK" ] && setting live.tiktok.key "$(js "$TK")"
-QA=$(ask quicklink_api "L'adresse de l'API Quicklink (StudioEdge, calls), vide : simulé :" "$(current calls.api)")
+QA=$(ask quicklink_api "L'adresse de l'API Quicklink (StudioEdge, calls), vide : plus tard :" "$(current calls.api)")
 setting calls.api "$(js "$QA")"
 if [ -n "$QA" ]; then
     setting calls.username "$(js "$(ask quicklink_user "Compte Quicklink :" "$(current calls.username)")")"

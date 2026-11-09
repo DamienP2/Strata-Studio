@@ -261,55 +261,6 @@ impl Calls for Quicklink {
     }
 }
 
-/// Simulated calls: each guest connects a few seconds after being created;
-/// the second one has an unstable line for a while.
-#[derive(Default)]
-pub struct SimCalls {
-    guests: Vec<(String, Instant)>,
-}
-
-impl Calls for SimCalls {
-    fn name(&self) -> String {
-        "StudioEdge simulé".into()
-    }
-    fn create_guest(&mut self, name: &str, _start: &str, _end: &str) -> Result<Guest> {
-        let n = self.guests.len() + 1;
-        let uid = format!("g{}", 900 + n);
-        let token: String = format!("Sim{n}{}", &"QcmStuxDqduzBx41LpHn9wKe"[n..n + 8]);
-        self.guests.push((uid.clone(), Instant::now()));
-        Ok(Guest {
-            link: format!("{LINK}{token}"),
-            uid,
-            token,
-            name: name.into(),
-        })
-    }
-    fn guest(&mut self, uid: &str) -> GuestState {
-        let Some(k) = self.guests.iter().position(|(u, _)| u == uid) else {
-            return GuestState::Waiting;
-        };
-        let age = self.guests[k].1.elapsed().as_secs_f32();
-        if age < 3.0 + 2.5 * k as f32 {
-            return GuestState::Waiting;
-        }
-        GuestState::Connected {
-            in_call: true,
-            unstable: k == 1 && (9.0..16.0).contains(&age),
-            audio: true,
-            video: true,
-        }
-    }
-    fn place(&mut self, _uid: &str, _position: u16) -> Result<()> {
-        Ok(())
-    }
-    fn unplace(&mut self, _uid: &str, _position: u16) -> Result<()> {
-        Ok(())
-    }
-    fn mute(&mut self, _uid: &str, _audio: bool, _video: bool) -> Result<()> {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,13 +319,5 @@ mod tests {
         let got = fake.requests();
         assert_eq!(got.len(), 3);
         assert!(got[1].1.contains("\"startdate\":\"2026-11-08 10:00:00\""));
-    }
-
-    #[test]
-    fn simulated_guests_arrive() {
-        let mut sim = SimCalls::default();
-        let g = sim.create_guest("Call 1", "", "").unwrap();
-        assert_eq!(sim.guest(&g.uid), GuestState::Waiting);
-        assert!(g.link.starts_with(LINK));
     }
 }

@@ -65,26 +65,15 @@ pub struct Capture {
     pub alerted: bool,
 }
 
-/// A live stream: pushed by ffmpeg, or simulated (the simulated studio
-/// without a platform's key).
-pub enum LiveRun {
-    Real(Live),
-    Sim(Instant),
-}
+/// A live stream pushed by ffmpeg.
+pub struct LiveRun(Live);
 
 impl LiveRun {
     pub fn state(&mut self) -> LiveState {
-        match self {
-            LiveRun::Real(l) => l.state(),
-            LiveRun::Sim(t) => LiveState::Live {
-                seconds: t.elapsed().as_secs(),
-            },
-        }
+        self.0.state()
     }
     pub fn stop(self) {
-        if let LiveRun::Real(l) = self {
-            l.stop();
-        }
+        self.0.stop();
     }
 }
 
@@ -133,7 +122,10 @@ pub struct ShootingView {
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     studio: String,
-    simulated: bool,
+    /// The devices not set yet.
+    unset: Vec<String>,
+    /// The microphones are received (else the tests are by ear).
+    mics_live: bool,
     t_ms: u64,
     step: u8,
     draft: crate::config::Programme,
@@ -376,6 +368,8 @@ impl App {
     fn prepare_tests(&mut self) {
         let placed = self.session.placed();
         let d = self.session.draft.clone();
+        // The studio as set now (cameras, shots, seats), then today's people.
+        *self.director.setup_mut() = self.settings.setup.clone();
         {
             let setup = self.director.setup_mut();
             for seat in &mut setup.seats {
@@ -506,7 +500,9 @@ impl App {
             .session
             .test_at
             .map_or(0, |a| a.elapsed().as_millis() as u64);
-        let ready = if t.seat.is_some() {
+        // Without the microphones received, the journalist listens and
+        // says it is good.
+        let ready = if t.seat.is_some() && self.voices.is_some() {
             self.session.hearing.heard && !self.session.hearing.low
         } else {
             elapsed > 1200
@@ -519,29 +515,17 @@ impl App {
         Ok(())
     }
 
-    /// The level heard on the tested seat's microphone. Without real
-    /// microphones, a voice is made up: the third person speaks too low
-    /// until the test is done again.
+    /// The level heard on the tested seat's microphone, when the
+    /// microphones are received.
     fn test_level(&self) -> Option<f32> {
         let t = self.session.tests.get(self.session.test_index)?;
         let seat = t.seat?;
-        if self.voices.is_some() {
-            return self
-                .last
-                .mics
-                .iter()
-                .find(|m| m.seat.0 == seat)
-                .map(|m| m.level_db);
-        }
-        let since = self.session.test_at.map_or(0, |a| a.elapsed().as_millis());
-        let wobble = ((self.now() as f32) / 150.0).sin().abs() * 6.0;
-        Some(if since < 1400 {
-            -70.0
-        } else if self.session.test_index == 2 && self.session.hearing.tries == 0 {
-            -52.0 + wobble
-        } else {
-            -26.0 + wobble
-        })
+        self.voices.as_ref()?;
+        self.last
+            .mics
+            .iter()
+            .find(|m| m.seat.0 == seat)
+            .map(|m| m.level_db)
     }
 
     // ---- launch and end ----
@@ -560,7 +544,9 @@ impl App {
             .get(d.profile)
             .cloned()
             .unwrap_or_default();
-        self.director.set_profile(profile.clone());
+        // A fresh Director for each shoot, on today's studio and profile.
+        self.director =
+            strata_studio_core::Director::new(self.director.setup().clone(), profile.clone());
         self.control.vertical = d.vertical;
         self.control.mode = Mode::Auto;
         self.control.forced = None;
@@ -623,13 +609,15 @@ impl App {
             if !on {
                 continue;
             }
-            if self.simulated && target.key.is_empty() {
-                self.lives.insert(name.into(), LiveRun::Sim(Instant::now()));
+            if input.is_empty() {
+                self.session.alerts.push(format!(
+                    "{name} : l'entrée du programme n'est pas réglée (Administration › Images)"
+                ));
                 continue;
             }
             match Live::start(&self.ffmpeg, &input, self.settings.live.accel, &target) {
                 Ok(l) => {
-                    self.lives.insert(name.into(), LiveRun::Real(l));
+                    self.lives.insert(name.into(), LiveRun(l));
                 }
                 Err(e) => self.session.alerts.push(format!("{name} : {e}")),
             }
@@ -990,7 +978,7 @@ impl App {
             });
         }
         if d.youtube {
-            let ok = !self.settings.live.youtube.key.is_empty() || self.simulated;
+            let ok = !self.settings.live.youtube.key.is_empty();
             recap_checks.push(if ok {
                 Check::ok("YouTube prêt", "")
             } else {
@@ -998,7 +986,7 @@ impl App {
             });
         }
         if d.tiktok {
-            let ok = !self.settings.live.tiktok.url.is_empty() || self.simulated;
+            let ok = !self.settings.live.tiktok.url.is_empty();
             recap_checks.push(if ok {
                 Check::ok("TikTok prêt", "")
             } else {
@@ -1062,7 +1050,8 @@ impl App {
         let s = &self.session;
         Snapshot {
             studio: self.settings.studio.clone(),
-            simulated: self.simulated,
+            unset: self.unset.clone(),
+            mics_live: self.voices.is_some(),
             t_ms: now,
             step: s.step,
             draft: s.draft.clone(),
@@ -1138,9 +1127,11 @@ impl App {
 }
 
 /// The checks of step 2, from the devices' own answers.
-fn run_checks(app: &Shared, ext: &SharedExt) {
+/// Asks every device whether it answers, as the studio check (step 2)
+/// and the administration show it. In order: Mélangeur, Caméras, Console,
+/// Micros, Images, Nodal, Lumière, Diffusion, Stockage.
+pub fn device_checks(app: &Shared, ext: &SharedExt) -> Vec<Check> {
     let gos: Vec<(String, GoState)> = {
-        let mut e = ext.lock().unwrap();
         let labels: Vec<String> = app
             .lock()
             .unwrap()
@@ -1149,6 +1140,7 @@ fn run_checks(app: &Shared, ext: &SharedExt) {
             .iter()
             .map(|g| g.label.clone())
             .collect();
+        let mut e = ext.lock().unwrap();
         e.gos
             .iter_mut()
             .enumerate()
@@ -1157,36 +1149,100 @@ fn run_checks(app: &Shared, ext: &SharedExt) {
     };
     let mut a = app.lock().unwrap();
     a.ext.gos = gos.iter().map(|(_, s)| s.clone()).collect();
+    let demo = false;
     let mut checks = Vec::new();
-    // Buttons drives the lights: it must answer.
-    checks.push(
-        match a.automation.set_variable("studio_state", "vérification") {
-            Ok(()) => Check::ok("Lumière", "scène par défaut"),
-            Err(e) => Check::warn("Lumière", format!("Buttons ne répond pas : {e}")),
-        },
-    );
-    let cams: Vec<bool> = a.ptz.values_mut().map(|p| p.status().online).collect();
-    let on = cams.iter().filter(|o| **o).count();
-    checks.push(if on == cams.len() {
-        Check::ok("Caméras", format!("{on} sur {} allumées", cams.len()))
-    } else {
-        Check::warn("Caméras", format!("{on} sur {} répondent", cams.len()))
-    });
+
     checks.push(if a.switcher.connected() {
-        Check::ok("Mélangeur", a.switcher.name())
+        Check::ok(
+            "Mélangeur",
+            if demo {
+                "simulé".into()
+            } else {
+                format!("{} · connecté", a.switcher.name())
+            },
+        )
     } else {
         Check::fail("Mélangeur", format!("{} ne répond pas", a.switcher.name()))
     });
-    checks.push(Check::ok("Console", a.console.name()));
-    checks.push(match &a.voices {
-        Some(_) => Check::ok("Micros", "Dante · flux AES67 reçu"),
-        None => Check::ok("Micros", "conversation simulée"),
+
+    let mut answered = 0;
+    let mut standby = Vec::new();
+    let mut silent = Vec::new();
+    let names: Vec<(strata_studio_core::CamId, String)> =
+        a.ptz.iter().map(|(id, p)| (*id, p.name())).collect();
+    for (id, name) in &names {
+        match a.ptz.get_mut(id).map(|p| p.check()) {
+            Some(Ok(true)) => answered += 1,
+            Some(Ok(false)) => standby.push(format!("Cam {}", id.0)),
+            _ => silent.push(format!("Cam {} ({name})", id.0)),
+        }
+    }
+    let n = names.len();
+    checks.push(if !silent.is_empty() {
+        Check::warn("Caméras", format!("{} ne répond pas", silent.join(", ")))
+    } else if !standby.is_empty() {
+        Check::warn("Caméras", format!("{} en veille", standby.join(", ")))
+    } else {
+        Check::ok("Caméras", format!("{answered} sur {n} allumées"))
     });
-    let routes = a.router.routes().len();
-    checks.push(Check::ok(
-        "Nodal",
-        format!("{} · {routes} routes", a.router.name()),
-    ));
+
+    checks.push(match a.console.check() {
+        Ok(model) => Check::ok("Console", if demo { "simulée".into() } else { model }),
+        Err(e) => Check::warn("Console", format!("ne répond pas : {e}")),
+    });
+
+    checks.push(match &a.voices {
+        Some(_) => Check::ok("Micros", "flux AES67 (Dante) reçu"),
+        None if demo => Check::ok("Micros", "conversation enregistrée (démo)"),
+        None => Check::warn("Micros", "pas de flux Dante : l'IA ne sait pas qui parle"),
+    });
+
+    let inputs = a
+        .settings
+        .recording
+        .channels
+        .iter()
+        .filter(|c| !c.input.is_empty())
+        .count();
+    checks.push(if demo {
+        Check::ok("Images", "images de test")
+    } else if inputs == a.settings.recording.channels.len() {
+        Check::ok("Images", format!("{inputs} entrées réglées"))
+    } else {
+        Check::warn(
+            "Images",
+            format!(
+                "{inputs} entrées réglées sur {}",
+                a.settings.recording.channels.len()
+            ),
+        )
+    });
+
+    checks.push(if a.settings.router.kind == "none" {
+        Check::ok("Nodal", "pas de nodal")
+    } else if a.router.connected() {
+        Check::ok(
+            "Nodal",
+            format!("{} · {} routes", a.router.name(), a.router.routes().len()),
+        )
+    } else {
+        Check::warn("Nodal", format!("{} ne répond pas", a.router.name()))
+    });
+
+    checks.push(
+        match a.automation.set_variable("studio_state", "vérification") {
+            Ok(()) => Check::ok(
+                "Lumière",
+                if demo {
+                    "simulée"
+                } else {
+                    "Bitfocus Buttons répond"
+                },
+            ),
+            Err(e) => Check::warn("Lumière", format!("Buttons ne répond pas : {e}")),
+        },
+    );
+
     let busy: Vec<String> = gos
         .iter()
         .filter(|(_, s)| matches!(s, GoState::Live { .. }))
@@ -1197,22 +1253,49 @@ fn run_checks(app: &Shared, ext: &SharedExt) {
         .filter(|(_, s)| matches!(s, GoState::Offline { .. }))
         .map(|(l, _)| l.clone())
         .collect();
-    checks.push(if !offline.is_empty() {
+    checks.push(if gos.is_empty() {
+        Check::ok("Diffusion", "pas de GO réglée")
+    } else if !offline.is_empty() {
         Check::warn("Diffusion", format!("{} ne répond pas", offline.join(", ")))
     } else if busy.is_empty() {
         Check::ok("Diffusion", "les GO sont libres")
     } else {
         Check::ok("Diffusion", format!("{} déjà en service", busy.join(", ")))
     });
+
     let root = a.desk.as_ref().map(|d| d.root.clone());
+    let shares = a.settings.storages.len();
     checks.push(match root.and_then(|r| record::free_bytes(&r)) {
-        Some(b) => Check::ok("Stockage", format!("{} libres sur le serveur", bytes(b))),
+        Some(b) => Check::ok(
+            "Stockage",
+            format!(
+                "{} libres sur le serveur · {}",
+                bytes(b),
+                if shares == 0 {
+                    "aucun partage".to_string()
+                } else {
+                    format!("{shares} partage{}", if shares > 1 { "s" } else { "" })
+                }
+            ),
+        ),
         None => Check::warn("Stockage", "place sur le serveur inconnue"),
     });
-    // A device simulated because it did not answer at start.
-    for (label, error) in a.device_errors.clone() {
-        // Without a switcher there is no shoot; the rest is shot without.
-        let detail = format!("ne répond pas : {error}");
+
+    // A device that did not answer at start, then the ones not set: they
+    // say so (without a switcher there is no shoot; the rest is shot
+    // without).
+    let mut over: Vec<(String, String)> = a
+        .device_errors
+        .iter()
+        .map(|(l, e)| (l.clone(), format!("ne répond pas : {e}")))
+        .collect();
+    over.extend(a.unset.iter().map(|l| {
+        (
+            l.clone(),
+            format!("{} : à régler dans l'administration", crate::config::UNSET),
+        )
+    }));
+    for (label, detail) in over {
         let c = if label == "Mélangeur" {
             Check::fail(&label, detail)
         } else {
@@ -1223,6 +1306,12 @@ fn run_checks(app: &Shared, ext: &SharedExt) {
             None => checks.push(c),
         }
     }
+    checks
+}
+
+fn run_checks(app: &Shared, ext: &SharedExt) {
+    let checks = device_checks(app, ext);
+    let mut a = app.lock().unwrap();
     a.session.checks = checks;
     a.session.checks_at = Some(Instant::now());
 }

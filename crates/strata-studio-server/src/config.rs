@@ -3,8 +3,8 @@
 //! and their addresses, the encoders, the platforms, the storages, the
 //! programmes, the directing profiles and the automations.
 //!
-//! An address left empty means the device is simulated: Studio runs and
-//! shows itself without hardware.
+//! An address left empty means the studio has no such device yet: Studio
+//! says it is « non réglé », and does not pretend.
 
 use crate::record::RecordSettings;
 use crate::scenario::Scenario;
@@ -60,7 +60,7 @@ pub struct SwitcherSettings {
 impl Default for SwitcherSettings {
     fn default() -> Self {
         SwitcherSettings {
-            kind: "sim".into(),
+            kind: String::new(),
             address: String::new(),
             vmix_split: 20,
             vmix_pip: 21,
@@ -80,13 +80,13 @@ pub struct CameraSettings {
 impl Default for CameraSettings {
     fn default() -> Self {
         CameraSettings {
-            control: "sim".into(),
+            control: String::new(),
             travel_ms: 1200,
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ConsoleSettings {
     /// `sim`, `m32` or `dm5`.
@@ -94,19 +94,11 @@ pub struct ConsoleSettings {
     pub address: String,
 }
 
-impl Default for ConsoleSettings {
-    fn default() -> Self {
-        ConsoleSettings {
-            kind: "sim".into(),
-            address: String::new(),
-        }
-    }
-}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ButtonsSettings {
-    /// `address:port` of Bitfocus Buttons' HTTP API (empty: simulated).
+    /// `address:port` of Bitfocus Buttons' HTTP API (empty: not set).
     pub address: String,
     /// Studio writes the Stream Deck's keys into Buttons' variables.
     pub deck: bool,
@@ -132,7 +124,7 @@ pub struct RouterSettings {
 impl Default for RouterSettings {
     fn default() -> Self {
         RouterSettings {
-            kind: "sim".into(),
+            kind: "none".into(),
             address: String::new(),
             senders: vec![],
             receivers: vec![],
@@ -175,12 +167,10 @@ pub struct Storage {
 #[serde(rename_all = "camelCase", default)]
 pub struct GoSettings {
     pub label: String,
-    /// The Streaming Encoder's address (empty: simulated).
+    /// The Streaming Encoder's address (empty: not set).
     pub address: String,
     /// The nodal's destination feeding it.
     pub destination: String,
-    /// Simulation only: taken by another studio.
-    pub sim_busy: bool,
 }
 
 impl Default for GoSettings {
@@ -189,7 +179,6 @@ impl Default for GoSettings {
             label: "GO".into(),
             address: String::new(),
             destination: String::new(),
-            sim_busy: false,
         }
     }
 }
@@ -225,7 +214,7 @@ impl Default for LiveSettings {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CallSettings {
-    /// The Quicklink API's address (empty: simulated).
+    /// The Quicklink API's address (empty: not set).
     pub api: String,
     pub username: String,
     pub password: String,
@@ -305,70 +294,48 @@ impl Default for Programme {
 }
 
 impl Default for Settings {
+    /// A real studio, nothing set yet: every device is « non réglé » until
+    /// the administration (or the installer) gives its address.
     fn default() -> Self {
-        let p = |name: &str,
-                 people: u8,
-                 go: u8,
-                 yt: bool,
-                 tt: bool,
-                 vertical: bool,
-                 res: &str,
-                 calls: u8,
-                 profile: usize| Programme {
-            name: name.into(),
-            profile,
-            clean: true,
-            resolution: res.into(),
-            vertical,
-            go,
-            youtube: yt,
-            tiktok: tt,
-            people,
-            calls,
-            ..Programme::default()
-        };
         Settings {
-            studio: "Studio A".into(),
-            setup: StudioSetup::example(),
+            studio: "Studio".into(),
+            setup: Self::blank_setup(),
             switcher: SwitcherSettings::default(),
             cameras: CameraSettings::default(),
             console: ConsoleSettings::default(),
             buttons: ButtonsSettings::default(),
             router: RouterSettings::default(),
             audio: AudioSettings::default(),
-            recording: RecordSettings::demo(),
-            storages: vec![
-                Storage {
-                    label: "Rédaction vidéo".into(),
-                    path: "partages/redaction".into(),
-                },
-                Storage {
-                    label: "Archives des émissions".into(),
-                    path: "partages/archives".into(),
-                },
-            ],
-            gos: (1..=4)
-                .map(|n| GoSettings {
-                    label: format!("GO{n}"),
-                    address: String::new(),
-                    destination: format!("GO{n}"),
-                    sim_busy: n == 2,
-                })
-                .collect(),
+            recording: RecordSettings::unset(),
+            storages: vec![],
+            gos: vec![],
             live: LiveSettings::default(),
             calls: CallSettings::default(),
             agency_input: 10,
             duplex_input: 6,
-            programmes: vec![
-                p("Le Grand Débrief", 4, 3, true, true, true, "2160p50", 0, 1),
-                p("La Matinale", 3, 1, false, false, false, "1080p50", 1, 3),
-                p("L'Invité de 13h", 2, 4, true, false, true, "1080p50", 0, 2),
-            ],
+            programmes: vec![],
             profiles: Profile::all(),
             scenarios: crate::scenario::defaults(),
         }
     }
 }
+
+impl Settings {
+    /// Five seats, four cameras and their shots, with no address: the
+    /// studio's shape, to fill in.
+    pub fn blank_setup() -> StudioSetup {
+        let mut s = StudioSetup::example();
+        s.name = "Studio".into();
+        s.remotes.clear();
+        for c in &mut s.cameras {
+            c.address = None;
+        }
+        s
+    }
+}
+
+/// What a check reports for a device not set.
+pub const UNSET: &str = "non réglé";
 
 impl Settings {
     /// Reads the settings, or the default ones (written there) when the
@@ -380,8 +347,13 @@ impl Settings {
             return Ok(s);
         }
         let text = std::fs::read_to_string(path)?;
-        let s: Settings =
+        let mut s: Settings =
             serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{} : {e}", path.display()))?;
+        // Only a file written by Studio 0.2 carries its simulation's marks.
+        let from_0_2 = text.contains("\"light\"") || text.contains("\"simBusy\"");
+        if from_0_2 && s.forget_simulation() {
+            s.save(path)?;
+        }
         s.setup
             .validate()
             .map_err(|e| anyhow::anyhow!("{} : {e}", path.display()))?;
@@ -401,9 +373,92 @@ impl Settings {
         Ok(())
     }
 
-    /// Whether every device is simulated (a studio to try Studio).
-    pub fn simulated(&self) -> bool {
-        self.switcher.kind == "sim" && self.audio.sdp.is_empty()
+    /// Studio 0.2 wrote a simulated studio into new settings: simulated
+    /// devices, test pictures, example programmes and GO, shares in the
+    /// working folder. They are taken out; true if anything was.
+    pub fn forget_simulation(&mut self) -> bool {
+        let before = serde_json::to_string(self).unwrap_or_default();
+        let never_set = self.switcher.kind == "sim";
+        // The example's camera addresses, never set by anyone.
+        if matches!(self.cameras.control.as_str(), "" | "sim") {
+            for c in &mut self.setup.cameras {
+                if c.address
+                    .as_deref()
+                    .is_some_and(|a| a.starts_with("192.168.10.1") && a.len() == 13)
+                {
+                    c.address = None;
+                }
+            }
+        }
+        for k in [
+            &mut self.switcher.kind,
+            &mut self.console.kind,
+            &mut self.cameras.control,
+        ] {
+            if k == "sim" {
+                k.clear();
+            }
+        }
+        if self.router.kind == "sim" {
+            self.router.kind = "none".into();
+        }
+        for c in &mut self.recording.channels {
+            if c.input.iter().any(|x| x.contains("lavfi")) {
+                c.input.clear();
+            }
+        }
+        self.storages.retain(|s| !s.path.starts_with("partages"));
+        self.gos.retain(|g| !g.address.trim().is_empty());
+        if never_set {
+            let examples = ["Le Grand Débrief", "La Matinale", "L'Invité de 13h"];
+            self.programmes
+                .retain(|p| !examples.contains(&p.name.as_str()));
+            if self.studio == "Studio A" {
+                self.studio = "Studio".into();
+            }
+        }
+        serde_json::to_string(self).unwrap_or_default() != before
+    }
+
+    /// The devices not set yet (by the label of their check). The nodal is
+    /// optional (« none »).
+    pub fn unset(&self) -> Vec<&'static str> {
+        let mut v = Vec::new();
+        if !matches!(self.switcher.kind.as_str(), "atem" | "vmix")
+            || self.switcher.address.trim().is_empty()
+        {
+            v.push("Mélangeur");
+        }
+        if self.cameras.control != "visca"
+            || self
+                .setup
+                .cameras
+                .iter()
+                .any(|c| c.address.as_deref().unwrap_or("").trim().is_empty())
+        {
+            v.push("Caméras");
+        }
+        if !matches!(self.console.kind.as_str(), "m32" | "dm5")
+            || self.console.address.trim().is_empty()
+        {
+            v.push("Console");
+        }
+        if self.audio.sdp.trim().is_empty() {
+            v.push("Micros");
+        }
+        if self.buttons.address.trim().is_empty() {
+            v.push("Lumière");
+        }
+        if matches!(self.router.kind.as_str(), "sim" | "") {
+            v.push("Nodal");
+        }
+        if self.recording.channels.iter().any(|c| c.input.is_empty()) {
+            v.push("Images");
+        }
+        if self.storages.is_empty() {
+            v.push("Stockage");
+        }
+        v
     }
 }
 
@@ -423,7 +478,29 @@ mod tests {
         .unwrap();
         assert_eq!(partial.studio, "Studio B");
         assert_eq!(partial.switcher.vmix_split, 20);
-        assert_eq!(partial.gos.len(), 4);
+        assert!(partial.gos.is_empty() && partial.programmes.is_empty());
+        assert!(!partial.unset().contains(&"Mélangeur"));
+        assert!(partial.unset().contains(&"Caméras"));
+        assert_eq!(Settings::default().unset().len(), 7);
+    }
+
+    #[test]
+    fn the_simulated_studio_of_0_2_is_forgotten() {
+        let old = r#"{"studio":"Studio A","switcher":{"kind":"sim","address":""},"router":{"kind":"sim"},
+          "recording":{"codec":"h264","accel":"cpu","container":"mov","light":true,"channels":[{"name":"PGM","input":["-re","-f","lavfi","-i","testsrc2"]}]},
+          "storages":[{"label":"Rédaction vidéo","path":"partages/redaction"},{"label":"NAS","path":"/mnt/nas"}],
+          "gos":[{"label":"GO1","address":"","destination":"GO1","simBusy":false},{"label":"GO2","address":"10.0.0.2","destination":"GO2","simBusy":true}],
+          "programmes":[{"name":"La Matinale"},{"name":"Mon émission"}]}"#;
+        let mut s: Settings = serde_json::from_str(old).unwrap();
+        assert!(s.forget_simulation());
+        assert_eq!(s.switcher.kind, "");
+        assert_eq!(s.router.kind, "none");
+        assert!(s.recording.channels[0].input.is_empty());
+        assert_eq!(s.storages.len(), 1);
+        assert_eq!(s.gos.len(), 1);
+        assert_eq!(s.programmes.len(), 1);
+        assert_eq!(s.studio, "Studio");
+        assert!(!s.forget_simulation());
     }
 
     #[test]

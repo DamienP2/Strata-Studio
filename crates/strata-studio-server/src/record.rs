@@ -84,31 +84,23 @@ pub struct RecordSettings {
     pub container: Container,
     /// Each channel's ffmpeg input (DeckLink, NDI through a gateway, SRT…).
     pub channels: Vec<Channel>,
-    /// Small pictures, quickly encoded: the simulated studio, on a
-    /// machine without encoder.
-    #[serde(default)]
-    pub light: bool,
 }
 
 impl RecordSettings {
-    /// The simulated studio: generated pictures, encoded on the processor.
-    pub fn demo() -> Self {
-        let gen = |name: &str| Channel {
-            name: name.into(),
-            input: ["-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=50"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-        };
+    /// A real studio before its inputs are set: H.264 on the processor,
+    /// MOV, every channel's input still empty.
+    pub fn unset() -> Self {
         RecordSettings {
             codec: Codec::H264,
             accel: Accel::Cpu,
             container: Container::Mov,
             channels: ["PGM", "CLEAN", "CAM1", "CAM2", "CAM3", "CAM4"]
                 .into_iter()
-                .map(gen)
+                .map(|n| Channel {
+                    name: n.into(),
+                    input: vec![],
+                })
                 .collect(),
-            light: true,
         }
     }
 }
@@ -219,15 +211,7 @@ impl Desk {
     }
 
     fn encoder(&self, resolution: Resolution) -> Encoder {
-        let mut e = Encoder::new(self.settings.codec, self.settings.accel, resolution);
-        if self.settings.light {
-            e.size = Some((640, 360));
-            e.extra = ["-preset", "ultrafast", "-b:v", "2M"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-        }
-        e
+        Encoder::new(self.settings.codec, self.settings.accel, resolution)
     }
 
     /// Hours that can still be recorded with these answers.
@@ -257,8 +241,11 @@ impl Desk {
                     .channels
                     .iter()
                     .find(|c| c.name == *n)
+                    .filter(|c| !c.input.is_empty())
                     .cloned()
-                    .ok_or_else(|| format!("canal {n} non réglé"))
+                    .ok_or_else(|| {
+                        format!("l'entrée vidéo de {n} n'est pas réglée (Administration › Images)")
+                    })
             })
             .collect::<Result<_, _>>()?;
         let date = today();

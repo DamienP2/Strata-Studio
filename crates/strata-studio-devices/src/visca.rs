@@ -28,8 +28,17 @@ pub const PORT: u16 = 52381;
 
 /// The VISCA over IP datagram carrying `msg` as a command.
 pub fn datagram(seq: u32, msg: &[u8]) -> Vec<u8> {
+    framed(0x0100, seq, msg)
+}
+
+/// The datagram carrying `msg` as an inquiry.
+pub fn inquiry_datagram(seq: u32, msg: &[u8]) -> Vec<u8> {
+    framed(0x0110, seq, msg)
+}
+
+fn framed(kind: u16, seq: u32, msg: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(8 + msg.len());
-    out.extend_from_slice(&[0x01, 0x00]);
+    out.extend_from_slice(&kind.to_be_bytes());
     out.extend_from_slice(&(msg.len() as u16).to_be_bytes());
     out.extend_from_slice(&seq.to_be_bytes());
     out.extend_from_slice(msg);
@@ -37,6 +46,26 @@ pub fn datagram(seq: u32, msg: &[u8]) -> Vec<u8> {
 }
 
 /// Recall preset `preset` (0-based on the wire; Studio's presets are 1-based).
+/// `CAM_PowerInq`: the reply is `90 50 02 FF` (on) or `90 50 03 FF`
+/// (standby).
+pub const POWER_INQUIRY: [u8; 5] = [0x81, 0x09, 0x04, 0x00, 0xFF];
+
+/// The power state in an inquiry's reply (the VISCA message, without the
+/// 8-byte header), if it is one.
+pub fn power_reply(msg: &[u8]) -> Option<bool> {
+    match msg {
+        [0x90, 0x50, 0x02, 0xFF, ..] => Some(true),
+        [0x90, 0x50, 0x03, 0xFF, ..] => Some(false),
+        _ => None,
+    }
+}
+
+/// `CAM_Memory Set`: keep the current framing in a preset (1-based in
+/// Studio).
+pub fn preset_store(preset: u8) -> Vec<u8> {
+    vec![0x81, 0x01, 0x04, 0x3F, 0x01, preset.saturating_sub(1), 0xFF]
+}
+
 /// `CAM_Power`: on, or standby.
 pub fn power(on: bool) -> Vec<u8> {
     vec![0x81, 0x01, 0x04, 0x00, if on { 0x02 } else { 0x03 }, 0xFF]
@@ -145,6 +174,34 @@ impl Ptz for ViscaPtz {
     fn power(&mut self, on: bool) -> Result<()> {
         self.send(&power(on))
     }
+    fn check(&mut self) -> Result<bool> {
+        self.seq = self.seq.wrapping_add(1);
+        self.socket
+            .send_to(&inquiry_datagram(self.seq, &POWER_INQUIRY), self.camera)
+            .map_err(|e| DeviceError::Refused(self.name.clone(), e.to_string()))?;
+        let deadline = Instant::now() + Duration::from_millis(800);
+        let mut buf = [0u8; 64];
+        while Instant::now() < deadline {
+            self.socket.set_read_timeout(Some(
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .max(Duration::from_millis(10)),
+            ))?;
+            match self.socket.recv_from(&mut buf) {
+                Ok((n, from)) if from.ip() == self.camera.ip() && n > 8 => {
+                    if let Some(on) = power_reply(&buf[8..n]) {
+                        return Ok(on);
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        Err(DeviceError::NotConnected(self.name.clone()))
+    }
+    fn store(&mut self, preset: u8) -> Result<()> {
+        self.send(&preset_store(preset))
+    }
 }
 
 #[cfg(test)]
@@ -205,5 +262,40 @@ mod tests {
                 preset: Some(1)
             }
         );
+    }
+
+    #[test]
+    fn the_camera_says_whether_it_is_on() {
+        let cam = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let addr = cam.local_addr().unwrap();
+        let fake = std::thread::spawn(move || {
+            let mut buf = [0u8; 64];
+            let (n, from) = cam.recv_from(&mut buf).unwrap();
+            assert_eq!(&buf[..2], &[0x01, 0x10]);
+            assert_eq!(&buf[8..n], &POWER_INQUIRY);
+            let mut reply = vec![0x01, 0x11, 0x00, 0x04];
+            reply.extend_from_slice(&buf[4..8]);
+            reply.extend_from_slice(&[0x90, 0x50, 0x03, 0xFF]);
+            cam.send_to(&reply, from).unwrap();
+        });
+        let mut ptz = ViscaPtz::connect("Cam 2", addr, Duration::from_millis(10)).unwrap();
+        assert!(!ptz.check().unwrap(), "en veille");
+        fake.join().unwrap();
+        assert_eq!(
+            preset_store(3),
+            vec![0x81, 0x01, 0x04, 0x3F, 0x01, 0x02, 0xFF]
+        );
+    }
+
+    #[test]
+    fn a_camera_that_does_not_answer_is_said() {
+        let cam = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut ptz = ViscaPtz::connect(
+            "Cam 3",
+            cam.local_addr().unwrap(),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        assert!(ptz.check().is_err());
     }
 }

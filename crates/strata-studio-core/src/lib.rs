@@ -11,6 +11,7 @@ pub mod director;
 pub mod model;
 pub mod perception;
 pub mod profile;
+#[cfg(test)]
 pub mod script;
 pub mod speech;
 

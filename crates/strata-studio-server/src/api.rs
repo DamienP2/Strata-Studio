@@ -43,6 +43,7 @@ use strata_studio_core::Profile;
 #[derive(Clone)]
 pub struct Ctx {
     pub(crate) app: Shared,
+    pub(crate) ext: crate::shoot::SharedExt,
 }
 
 impl FromRef<Ctx> for Shared {
@@ -345,6 +346,38 @@ async fn scenario_run(State(app): State<Shared>, Path(ev): Path<String>) -> Repl
     done(Ok(()))
 }
 
+// ---- the devices, from the administration ----
+
+/// Asks every device now (the same check as the journey's step 2).
+async fn devices_check(State(ctx): State<Ctx>) -> Json<Vec<crate::session::Check>> {
+    let checks =
+        tokio::task::spawn_blocking(move || crate::shoot::device_checks(&ctx.app, &ctx.ext))
+            .await
+            .unwrap_or_default();
+    Json(checks)
+}
+
+async fn camera(
+    app: &Shared,
+    cam: u8,
+    f: impl FnOnce(&mut Box<dyn strata_studio_devices::Ptz>) -> strata_studio_devices::Result<()>,
+) -> Reply {
+    let mut a = app.lock().unwrap();
+    let Some(p) = a.ptz.get_mut(&strata_studio_core::CamId(cam)) else {
+        return done(Err(format!("Cam {cam} : pas d'adresse réglée")));
+    };
+    done(f(p).map_err(|e| e.to_string()))
+}
+async fn camera_recall(State(app): State<Shared>, Path((cam, preset)): Path<(u8, u8)>) -> Reply {
+    camera(&app, cam, |p| p.recall(preset)).await
+}
+async fn camera_store(State(app): State<Shared>, Path((cam, preset)): Path<(u8, u8)>) -> Reply {
+    camera(&app, cam, |p| p.store(preset)).await
+}
+async fn camera_power(State(app): State<Shared>, Path((cam, on)): Path<(u8, u8)>) -> Reply {
+    camera(&app, cam, |p| p.power(on != 0)).await
+}
+
 // ---- the nodal, the system ----
 
 async fn router_get(State(app): State<Shared>) -> Json<serde_json::Value> {
@@ -395,7 +428,7 @@ async fn system(State(app): State<Shared>) -> Json<serde_json::Value> {
             "microphones": if a.voices.is_some() { "AES67" } else { "simulés" },
         },
         "ndi": strata_studio_devices::ndi::LIBRARIES.iter().any(|l| unsafe { libloading::Library::new(l) }.is_ok()),
-        "simulated": a.simulated,
+        "unset": a.unset,
         "deviceErrors": a.device_errors,
     }))
 }
@@ -513,6 +546,10 @@ pub fn routes() -> Router<Ctx> {
         .route("/api/router", get(router_get))
         .route("/api/router/route", post(router_route))
         .route("/api/system", get(system))
+        .route("/api/devices/check", post(devices_check))
+        .route("/api/cameras/{cam}/recall/{preset}", post(camera_recall))
+        .route("/api/cameras/{cam}/store/{preset}", post(camera_store))
+        .route("/api/cameras/{cam}/power/{on}", post(camera_power))
         .route("/api/system/restart", post(restart))
         .route("/api/preview/{source}", get(preview))
 }

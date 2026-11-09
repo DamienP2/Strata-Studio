@@ -192,9 +192,14 @@ function Home({ s }) {
       <div class="enter" style="display:flex;flex-direction:column;align-items:center;gap:16px;text-align:center">
         <svg width="90" height="90" viewBox="0 0 96 96" fill="none" aria-hidden="true"><rect x="8" y="8" width="80" height="80" rx="24" fill="#b9c6ff"/><path d="M28 36h40M28 48h28M28 60h34" stroke="#0d1424" stroke-width="7" stroke-linecap="round"/></svg>
         <h1>Strata <span>Studio</span></h1>
-        <span style="font-size:20px;color:var(--mist)">${s.studio}${s.simulated ? ' · studio simulé' : null}</span>
+        <span style="font-size:20px;color:var(--mist)">${s.studio}</span>
       </div>
-      <button type="button" class="go-btn enter" onClick=${() => post('/api/session/start')}>Commencer un tournage ${I.arrow}</button>` : html`
+      ${s.unset.includes('Mélangeur') ? html`<div class="setup-card enter">
+          <b>Ce studio n’est pas encore réglé.</b>
+          <span>Il manque : ${s.unset.join(', ').toLowerCase()}. Le mélangeur est indispensable pour tourner.</span>
+          <a class="go-btn" style="height:64px;font-size:19px;text-decoration:none" href="/admin">Régler le studio ${I.arrow}</a></div>`
+        : html`<button type="button" class="go-btn enter" onClick=${() => post('/api/session/start')}>Commencer un tournage ${I.arrow}</button>
+          ${s.unset.length ? html`<a class="enter" href="/admin" style="color:var(--mist);font-size:15px">Encore à régler : ${s.unset.join(', ').toLowerCase()}</a>` : null}`}` : html`
       <h1 class="enter" style="font-size:44px">On allume le studio…</h1>
       <div class="boot-row">
         <div class="it"><span class=${'lamp' + (be > 0.3 ? ' on' : '')}>${I.sun}</span>Lumière</div>
@@ -276,7 +281,8 @@ function Programme({ s }) {
     <h1 class="h1">Quel programme tournez-vous ?</h1>
     <input class="input-big" type="text" value=${name} placeholder="Nom du programme" aria-label="Nom du programme"
       onFocus=${() => { focused.current = true; }} onBlur=${() => { focused.current = false; }} onInput=${(e) => setName(e.target.value)} />
-    <div class="stack" style="gap:10px"><span class="label">Programmes du studio · leurs réglages sont gardés</span>
+    ${s.programmes.length ? null : html`<p class="lead" style="margin:0;font-size:15px">Donnez un nom : les réponses de cette émission pourront être reprises la prochaine fois.</p>`}
+    <div class="stack" style=${{ gap: '10px', display: s.programmes.length ? 'flex' : 'none' }}><span class="label">Programmes du studio · leurs réglages sont gardés</span>
       <div class="row">${s.programmes.map((p, i) => html`<button type="button" class=${'pill' + (s.fromProgramme === p.name ? ' on' : '')} onClick=${() => post('/api/session/programme/' + i)}>${p.name}</button>`)}</div></div>
     <div class="stack" style="gap:10px"><span class="label">Style de réalisation</span>
       <div class="row">${s.profiles.map((p, i) => html`<button type="button" class=${'pill' + (d.profile === i ? ' on' : '')} onClick=${() => draft({ profile: i })}>${p}</button>`)}</div></div>
@@ -310,6 +316,7 @@ function Store({ s }) {
   const d = s.draft;
   return html`<div class="stack enter" style="max-width:820px">
     <div><h1 class="h1">Où ranger les fichiers après le tournage ?</h1><p class="lead">Studio enregistre sur son serveur, puis copie tout ici, rangé par programme et par date.</p></div>
+    ${!s.storages.length ? html`<div class="panel"><b>Aucun partage n’est réglé.</b><span class="lead" style="margin:0;font-size:15px">Les fichiers resteront sur le serveur. Un partage se règle dans l’administration (Partages).</span></div>` : null}
     ${s.storages.map((st, i) => html`<button type="button" class=${'card' + (d.storage === i ? ' on' : '')} style="flex-direction:row;align-items:center;gap:16px" onClick=${() => draft({ storage: i })}>
       <span class=${'radio' + (d.storage === i ? ' on' : '')}></span>
       <span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span class="t" style="font-size:19px">${st.label}</span><span class="s mono" style="overflow:hidden;text-overflow:ellipsis">${st.path}</span></span>
@@ -361,6 +368,7 @@ function Diff({ s }) {
   return html`<div class="stack enter">
     <h1 class="h1">On diffuse en direct ?</h1>
     <div class="stack" style="gap:10px"><span class="label">Plateforme GO · une seule</span>
+      ${!s.gos.length ? html`<p class="lead" style="margin:0;font-size:15px">Aucune plateforme GO n’est réglée (administration › Diffusion).</p>` : null}
       <div class="grid g4 gos" style="max-width:820px">${s.gos.map((g, i) => {
         const busy = g.state !== 'idle', on = d.go === i + 1;
         return html`<button type="button" class=${'go' + (busy ? ' busy' : on ? ' on' : '')} disabled=${busy && !on} aria-pressed=${on} onClick=${() => draft({ go: on ? 0 : i + 1 })}>
@@ -407,7 +415,7 @@ function Remote({ s }) {
       <div class=${'card static wide' + (d.calls ? ' on' : '')}>
         <span class="t" style="font-size:26px">Call</span><span class="s">Studiocall, Teams ou Zoom</span>
         <div class="stepper" style="gap:12px"><button type="button" style="width:52px;height:52px;font-size:26px" aria-label="Un appel de moins" onClick=${() => draft({ calls: Math.max(0, d.calls - 1) })}>−</button><span class="n" style="font-size:56px;width:50px">${d.calls}</span><button type="button" class="plus" style="width:52px;height:52px;font-size:26px" aria-label="Un appel de plus" onClick=${() => draft({ calls: Math.min(4, d.calls + 1) })}>+</button></div>
-        <span class="s">${d.calls ? `${d.calls} appel${d.calls > 1 ? 's' : null} en même temps, par StudioEdge` : 'aucun appel'}</span>
+        <span class="s">${d.calls ? `${d.calls} appel${d.calls > 1 ? 's' : ''} en même temps, par StudioEdge` : 'aucun appel'}</span>
       </div>
       ${[['agency', 'Agence de presse', 'une image d’agence en direct'], ['duplex', 'Duplex', 'un reporter en Aviwest']].map(([id, t, sub]) => html`<button type="button" class=${'card' + (d[id] ? ' on' : '')} aria-pressed=${d[id]} onClick=${() => draft({ [id]: !d[id] })}>
         <span class="t" style="font-size:26px">${t}</span><span class="s">${sub}</span><span style="flex:1"></span><span class=${'switch' + (d[id] ? ' on' : '')}><i></i></span></button>`)}
@@ -492,10 +500,12 @@ function Tests({ s }) {
   const cur = s.tests[Math.min(s.testIndex, s.tests.length - 1)] || {};
   const hearing = s.hearing;
   const remote = cur.seat == null;
-  const heard = remote ? (s.testMs || 0) > 1200 : hearing.heard;
-  const low = !all && !remote && hearing.low;
+  // Without the microphones received, the journalist listens.
+  const byEar = remote || !s.micsLive;
+  const heard = byEar ? (s.testMs || 0) > 1200 : hearing.heard;
+  const low = !all && !byEar && hearing.low;
   const ask = remote ? (cur.label || '').startsWith('Call') ? 'L’invité est connecté : demandez-lui de dire quelques mots.' : 'Demandez quelques mots, vérifiez l’image.' : `${first(cur.label)}, dites votre nom et votre fonction.`;
-  const say = all ? 'Tout est prêt.' : low ? 'Plus près du micro, s’il vous plaît.' : heard ? 'Merci, c’est bien reçu.' : ask;
+  const say = all ? 'Tout est prêt.' : low ? 'Plus près du micro, s’il vous plaît.' : byEar ? ask : heard ? 'Merci, c’est bien reçu.' : ask;
   const canOk = !all && heard && !low;
   return html`<div class="row split enter" style="gap:24px;align-items:flex-start">
     <div class="stack" style="gap:14px;flex:0 1 560px;min-width:0">
@@ -506,7 +516,7 @@ function Tests({ s }) {
         ${!all && cur.source ? html`<img src=${'/api/preview/' + cur.source} alt=${'Image de ' + cur.source} />` : null}
         ${d.vertical ? html`<span class=${'side' + (s.screen === 'only' ? ' only' : '')} style="left:0"></span><span class=${'side' + (s.screen === 'only' ? ' only' : '')} style="right:0"></span>${s.screen === 'zone' ? html`<span class="zone"></span>` : null}` : null}
         <span class="src">${all ? 'PGM' : cur.source}</span>
-        <div class="meter" aria-hidden="true"><${Meter} level=${all ? 0 : hearing.level} n=${16} /></div>
+        ${s.micsLive ? html`<div class="meter" aria-hidden="true"><${Meter} level=${all ? 0 : hearing.level} n=${16} /></div>` : null}
         <div class="say"><span class="pulse" style=${{ width: '10px', height: '10px', borderRadius: '50%', flex: 'none', background: low ? '#ffc46b' : heard ? '#4ade80' : '#b9c6ff' }}></span>${say}</div>
       </div>
       ${d.vertical ? html`<div class="row">${[['zone', 'Zone 9:16'], ['only', '9:16 seul']].map(([id, t]) => html`<button type="button" class=${'pill' + (s.screen === id ? ' on' : '')} onClick=${() => draft({ screen: id })}>${t}</button>`)}</div>` : null}
@@ -515,6 +525,7 @@ function Tests({ s }) {
       ${s.tests.map((t, k) => { const active = !all && k === s.testIndex; const col = t.done ? 'var(--ok-ink)' : active ? (low ? 'var(--warn-ink)' : 'var(--blue)') : 'var(--ink-4)';
         return html`<div class=${'tline' + (active ? ' cur' : '')}><span class="d" style=${{ background: t.done ? 'var(--ok)' : active ? (low ? 'var(--warn)' : 'var(--blue)') : undefined }}></span><b>${t.label}</b><small style=${{ color: col }}>${t.done ? 'OK' : active ? (low ? 'trop faible' : heard ? 'reçu' : 'en test') : 'à faire'}</small></div>`; })}
       ${low ? html`<div class="alert enter" style="margin:0">On entend mal ${first(cur.label)}. Rapprochez son micro (une main entre la bouche et le micro), puis « Refaire ».</div>` : null}
+      ${!all && !remote && !s.micsLive ? html`<div class="alert" style="margin:0;background:var(--lilac);color:var(--lilac-ink)">Les micros Dante ne sont pas reçus par Studio : écoutez la personne, puis validez si le son est bon.</div>` : null}
       <div class="row" style="flex-wrap:nowrap">
         <button type="button" class="btn ghost" style="flex:1" onClick=${() => post('/api/session/test/retry')}>Refaire</button>
         <button type="button" class=${'btn' + (canOk ? '' : ' off')} style="flex:1.4" onClick=${() => canOk && post('/api/session/test/ok')}>${all ? 'Fait' : 'Image et son OK'}</button>
@@ -546,14 +557,14 @@ function Shooting({ s }) {
   return html`<div class="row split enter" style="gap:28px;align-items:flex-start">
     <div class="stack" style="gap:14px;flex:0 1 380px">
       <h1 class="h1" style="font-size:46px">${manual ? 'Un humain a la main.' : 'Tout tourne.'}</h1>
-      <p class="lead" style="min-height:52px">${manual ? 'Quelqu’un a coupé au pupitre du mélangeur. L’IA attend, elle reprendra seule.' : `L’IA réalise${s.speaker ? ' : ' + s.speaker + ' parle' : null}. Plans larges et plans d’écoute viennent seuls.`}</p>
+      <p class="lead" style="min-height:52px">${manual ? 'Quelqu’un a coupé au pupitre du mélangeur. L’IA attend, elle reprendra seule.' : `L’IA réalise${s.speaker ? ' : ' + s.speaker + ' parle' : ''}. Plans larges et plans d’écoute viennent seuls.`}</p>
       <span class="chrono">${fmt(s.shooting.seconds)}</span>
       <div class="tline" style=${{ boxShadow: manual ? '0 0 0 2px var(--warn)' : undefined }}><span style=${{ padding: '6px 12px', borderRadius: '10px', fontSize: '13px', fontWeight: 800, letterSpacing: '.06em', background: manual ? 'var(--warn)' : 'var(--night)', color: manual ? '#1d1200' : '#fff' }}>${manual ? 'MANUEL' : shadow ? 'OMBRE' : 'IA'}</span><b>${manual ? 'Débrayage au pupitre' : s.onAir || 'Réalisation automatique'}</b></div>
     </div>
     <div class="stack" style="flex:1;gap:10px;min-width:0">
       <div class="tline"><span class="d pulse" style="background:var(--live);width:12px;height:12px"></span><b>Enregistrement</b><small style="color:var(--ink-2);font-weight:600">${recList(s.draft).join(', ')} · ${resLabel(s.draft)}</small></div>
       ${streams.map(([name, st]) => html`<div class="tline"><b>${name}</b><small style=${{ color: st && (st.state === 'live') ? 'var(--ok-ink)' : 'var(--live)' }}>${st && st.state === 'live' ? 'en ligne' : st && st.state === 'failed' ? 'décroché' : '…'}</small></div>`)}
-      <div class="panel" style="gap:8px;padding:14px 16px"><b>Son</b>${s.levels.map((l) => html`<div class="row" style="gap:10px;flex-wrap:nowrap"><span style="width:90px;font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${first(l.name)}</span><span class="bar" style="flex:1;height:8px"><i style=${{ width: Math.max(4, Math.min(100, (l.levelDb + 60) / 60 * 100)) + '%', transition: 'width .15s' }}></i></span></div>`)}</div>
+      <div class="panel" style="gap:8px;padding:14px 16px"><b>Son</b>${!s.micsLive ? html`<span style="font-size:14px;color:var(--ink-3)">Micros Dante non reçus : l’IA garde le plan large.</span>` : null}${s.levels.map((l) => html`<div class="row" style="gap:10px;flex-wrap:nowrap"><span style="width:90px;font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${first(l.name)}</span><span class="bar" style="flex:1;height:8px"><i style=${{ width: Math.max(4, Math.min(100, (l.levelDb + 60) / 60 * 100)) + '%', transition: 'width .15s' }}></i></span></div>`)}</div>
     </div>
   </div>`;
 }
@@ -577,7 +588,7 @@ function Fin({ s }) {
     <div class="stack" style="gap:18px;flex:0 1 340px">
       <svg width="110" height="110" viewBox="0 0 120 120" fill="none" aria-hidden="true"><circle cx="60" cy="60" r="52" stroke="#22a35f" stroke-width="6"/><path d="M38 62l15 15 30-32" stroke="#22a35f" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <h1 class="h1 enter" style="font-size:56px">C’est dans la boîte.</h1>
-      <p class="lead">${d.name} · ${fmt(e.seconds)} · ${e.files} fichiers. Le profil du programme est gardé pour la prochaine fois.</p>
+      <p class="lead">${d.name} · ${fmt(e.seconds)} · ${e.files} fichier${e.files > 1 ? 's' : ''}. Le profil du programme est gardé pour la prochaine fois.</p>
       ${a.error ? html`<div class="alert" style="margin:0">${a.error}</div>` : null}
       ${e.id ? html`<a href=${'/tournages/' + e.id} style="font-weight:700;color:var(--lilac-ink)">Voir le tournage, sa frise et ses exports</a>` : null}
     </div>
@@ -607,11 +618,11 @@ function Screen() {
   } else if (s.step === 12 && s.tests.length && s.testIndex < s.tests.length) {
     const t = s.tests[s.testIndex];
     const remote = t.seat == null;
-    const heard = remote ? (s.testMs || 0) > 1200 : s.hearing.heard;
+    const heard = remote || !s.micsLive ? false : s.hearing.heard;
     const say = !remote && s.hearing.low ? 'Plus près du micro, s’il vous plaît.' : heard ? 'Merci, c’est bien reçu.' : remote ? 'Quelques mots, s’il vous plaît.' : `${first(t.label)}, dites votre nom et votre fonction.`;
     body = html`<div class="scam"><img src=${'/api/preview/' + t.source} alt="" />
       ${s.draft.vertical ? html`<span class=${'side' + (s.screen === 'only' ? ' only' : '')} style="position:absolute;left:0;top:0;bottom:0;width:34.2%;background:rgba(0,0,0,.55)"></span><span style="position:absolute;right:0;top:0;bottom:0;width:34.2%;background:rgba(0,0,0,.55)"></span><span style="position:absolute;left:34.2%;top:0;bottom:0;width:31.6%;border:.4vh dashed #ffd27a"></span>` : null}
-      <div class="meter"><${Meter} level=${s.hearing.level} n=${20} /></div>
+      ${s.micsLive ? html`<div class="meter"><${Meter} level=${s.hearing.level} n=${20} /></div>` : null}
       <div class="say"><span class="pulse" style=${{ width: '2vh', height: '2vh', borderRadius: '50%', background: s.hearing.low ? '#ffc46b' : heard ? '#4ade80' : '#b9c6ff' }}></span>${say}</div></div>`;
   } else if (s.step === 14) {
     body = html`<h1>C’est dans la boîte.</h1><span class="sub">Merci à tous. Le studio range les fichiers et s’éteint.</span>`;
@@ -644,15 +655,19 @@ function Deck() {
 
 // ---------- the web pages ----------
 
-const NAV = [['/tournages', 'Tournages'], ['/direct', 'Direct'], ['/programmes', 'Programmes'], null, ['/admin/studio', 'Studio'], ['/admin/realisation', 'Réalisation'], ['/admin/systeme', 'Système']];
-
+// The pages of the people who make the shows; the administration has its
+// own frame (below).
 function Web({ path, children, studio }) {
+  const s = useSnapshot();
+  const live = s && s.shooting;
+  const nav = [['/tournages', 'Tournages'], ['/direct', 'Direct'], ['/programmes', 'Programmes']];
   return html`<div class="dark">
     <header class="w-head">
-      <a href="/" class="w-brand" style="color:inherit;text-decoration:none"><b>Strata</b> <span>Studio</span></a>
-      <nav class="w-nav" aria-label="Pages">${NAV.map((n) => (n ? html`<a href=${n[0]} class=${path.startsWith(n[0]) ? 'on' : null}>${n[1]}</a>` : html`<span class="sep"></span>`))}</nav>
-      <span style="flex:1"></span><a class="wbtn" href="/">Tablette</a><a class="wbtn" href="/ecran">Écran</a>
-      <span class="w-sub">${studio || ''}</span>
+      <a href="/tournages" class="w-brand" style="color:inherit;text-decoration:none"><b>Strata</b> <span>Studio</span></a>
+      <nav class="w-nav" aria-label="Pages">${nav.map(([h, t]) => html`<a href=${h} class=${path.startsWith(h) ? 'on' : null}>${t}${h === '/direct' && live ? html` <span class="pulse" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff4d66"></span>` : null}</a>`)}</nav>
+      <span style="flex:1"></span>
+      <span class="w-sub">${studio || (s && s.studio) || ''}</span>
+      <a class="wbtn" href="/">Tablette</a><a class="wbtn" href="/admin">Administration</a>
     </header>
     <main class="w-main">${children}</main>
   </div>`;
@@ -718,23 +733,33 @@ function Shoot({ id }) {
 function Live() {
   const s = useSnapshot();
   const [rec] = useFetch('/api/record/status', [s && s.shooting ? 1 : 0]);
+  const [last] = useFetch('/api/tournages');
   if (!s) return html`<${Web} path="/direct"><p class="w-sub">Connexion…</p><//>`;
+  if (!s.shooting) {
+    const r = last && last[0];
+    return html`<${Web} path="/direct">
+      <div class="empty"><span class="empty-dot"></span><h1 class="w-title">Aucun tournage en cours</h1>
+        <p class="w-sub">Le direct s’affiche ici dès qu’un tournage est lancé depuis la tablette, le téléphone ou le Stream Deck : l’image du programme, qui parle, ce que l’IA décide, et les boutons pour reprendre la main.</p>
+        ${s.step > 1 && s.step < 14 ? html`<p class="w-sub">Un tournage se prépare : étape ${s.step} sur 14${s.draft.name ? ' · ' + s.draft.name : ''}.</p>` : null}
+        ${r ? html`<a class="wbtn" href=${'/tournages/' + r.id}>Voir le dernier tournage : ${r.programme}</a>` : null}</div>
+    <//>`;
+  }
   const mode = s.mode.mode === 'auto' ? 'IA' : s.mode.mode === 'shadow' ? 'OMBRE' : 'MANUEL';
-  return html`<${Web} path="/direct" studio=${s.studio}>
-    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">Direct</h1><span class="w-sub">${s.shooting ? `${s.draft.name} · ${fmt(s.shooting.seconds)}` : 'Pas de tournage en cours · étape ' + s.step}</span></div>
-      <div class="row"><span class=${'tag ' + (mode === 'IA' ? 'ok' : 'warn')}>${mode}</span>
-        <button type="button" class="wbtn" onClick=${() => post('/api/control/auto')}>Rendre la main à l’IA</button>
-        <button type="button" class="wbtn" onClick=${() => post('/api/control/shadow')}>Mode ombre</button>
-        <button type="button" class="wbtn" onClick=${() => post('/api/control/take?by=r%C3%A9gie')}>Prendre la main</button></div></div>
+  return html`<${Web} path="/direct">
+    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">${s.draft.name}</h1><span class="w-sub">En tournage depuis ${fmt(s.shooting.seconds)}</span></div>
+      <div class="row"><span class=${'tag ' + (mode === 'IA' ? 'ok' : 'warn')}>${mode === 'IA' ? 'L’IA réalise' : mode === 'OMBRE' ? 'IA en ombre' : 'Un humain a la main'}</span>
+        ${mode !== 'IA' ? html`<button type="button" class="wbtn pri" onClick=${() => post('/api/control/auto')}>Rendre la main à l’IA</button>` : html`<button type="button" class="wbtn" onClick=${() => post('/api/control/take?by=r%C3%A9gie')}>Prendre la main</button>`}
+        ${mode !== 'OMBRE' ? html`<button type="button" class="wbtn" title="L’IA décide sans rien envoyer : on la compare au réalisateur" onClick=${() => post('/api/control/shadow')}>IA en ombre</button>` : null}</div></div>
     <div class="cols">
-      <div class="box" style="flex:2 1 520px"><div class="preview"><img src="/api/preview/PGM" alt="Programme" /><span class=${'tag onair ' + (s.shooting ? 'live' : '')}>${s.shooting ? 'ENREGISTREMENT' : 'PGM'}</span></div>
+      <div class="box" style="flex:2 1 520px"><div class="preview"><img src="/api/preview/PGM" alt="Programme" /><span class="tag onair live">ENREGISTREMENT</span></div>
         <div class="row" style="justify-content:space-between"><b>${s.onAir || '—'}</b><span class="w-sub">${s.speaker ? s.speaker + ' parle' : null}</span></div></div>
-      <div class="box"><h2>Son</h2>${s.levels.map((l) => html`<div class="lvl"><b>${l.name}</b><span class="m"><i style=${{ width: Math.max(2, Math.min(100, (l.levelDb + 60) / 60 * 100)) + '%', background: l.voice ? '#22c55e' : '#3a4058' }}></i></span></div>`)}
-        <h2>Diffusion</h2>${s.gos.map((g) => html`<div class="row" style="justify-content:space-between"><span>${g.label}</span><span class=${'tag ' + (g.state === 'live' ? 'live' : g.state === 'offline' ? 'warn' : '')}>${g.state === 'live' ? 'en service' : g.state === 'offline' ? 'hors ligne' : 'libre'}</span></div>`)}
+      <div class="box"><h2>Son</h2>${s.levels.length ? s.levels.map((l) => html`<div class="lvl"><b>${l.name}</b><span class="m"><i style=${{ width: Math.max(2, Math.min(100, (l.levelDb + 60) / 60 * 100)) + '%', background: l.voice ? '#22c55e' : '#3a4058' }}></i></span></div>`) : html`<span class="w-sub">Micros Dante non reçus.</span>`}
+        <h2>Diffusion</h2>${s.draft.go ? html`<div class="row" style="justify-content:space-between"><span>${(s.gos[s.draft.go - 1] || {}).label}</span><span class="tag live">en service</span></div>` : null}
         ${Object.entries(s.lives).map(([k, v]) => html`<div class="row" style="justify-content:space-between"><span>${k === 'youtube' ? 'YouTube' : 'TikTok'}</span><span class=${'tag ' + (v.state === 'live' ? 'live' : 'warn')}>${v.state === 'live' ? fmt(v.seconds) : 'décroché'}</span></div>`)}
-        <h2>Enregistrement</h2>${rec && rec.channels && rec.channels.length ? rec.channels.map(([n, c]) => html`<div class="row" style="justify-content:space-between"><span>${n}</span><span class="mono">${c.state} ${c.bytes ? bytes(c.bytes) : null}</span></div>`) : html`<span class="w-sub">rien en cours</span>`}</div>
+        ${!s.draft.go && !Object.keys(s.lives).length ? html`<span class="w-sub">Pas de direct : enregistrement seul.</span>` : null}
+        <h2>Enregistrement</h2>${rec && rec.channels && rec.channels.length ? rec.channels.map(([n, c]) => html`<div class="row" style="justify-content:space-between"><span>${n}</span><span class="mono">${c.state === 'recording' ? 'enregistre' : c.state} ${c.bytes ? bytes(c.bytes) : null}</span></div>`) : html`<span class="w-sub">…</span>`}</div>
     </div>
-    <div class="box"><h2>Journal</h2><div class="journal">${s.journal.map((e) => html`<div class=${e.sent ? '' : 'off'}><span class="t">${fmt(e.tMs / 1000)}</span><span>${e.text}</span></div>`)}</div></div>
+    <div class="box"><h2>Ce que l’IA décide</h2><div class="journal">${s.journal.map((e) => html`<div class=${e.sent ? '' : 'off'}><span class="t">${fmt(e.tMs / 1000)}</span><span>${e.text}</span></div>`)}</div></div>
   <//>`;
 }
 
@@ -749,13 +774,14 @@ function Programmes() {
   const del = (i) => setList({ ...list, programmes: progs.filter((_, j) => j !== i) });
   const chk = (i, k, t) => html`<label class="row" style="gap:6px;font-size:13px"><input type="checkbox" checked=${progs[i][k]} onChange=${(e) => set(i, k, e.target.checked)} />${t}</label>`;
   return html`<${Web} path="/programmes" studio=${snap && snap.studio}>
-    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">Programmes</h1><span class="w-sub">Choisir un programme sur la tablette reprend tous ses réglages.</span></div>
-      <div class="row"><button type="button" class="wbtn" onClick=${add}>Ajouter</button><button type="button" class="wbtn pri" onClick=${save}>Enregistrer</button></div></div>
+    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">Programmes</h1><span class="w-sub">Chaque émission garde ses réponses : la choisir sur la tablette reprend tous ses réglages.</span></div>
+      <div class="row"><button type="button" class="wbtn" onClick=${add}>Ajouter un programme</button><button type="button" class="wbtn pri" onClick=${save}>Enregistrer</button></div></div>
+    ${!progs.length ? html`<div class="empty"><h1 class="w-title">Aucun programme</h1><p class="w-sub">Ajoutez vos émissions ici, ou tournez-en une depuis la tablette : ses réponses pourront être gardées.</p></div>` : null}
     ${progs.map((p, i) => html`<div class="box">
       <div class="fields">
         <label class="field">Nom<input value=${p.name} onInput=${(e) => set(i, 'name', e.target.value)} /></label>
         <label class="field">Style de réalisation<select value=${p.profile} onChange=${(e) => set(i, 'profile', +e.target.value)}>${list.profiles.map((pr, k) => html`<option value=${k}>${pr.name}</option>`)}</select></label>
-        <label class="field">Stockage<select value=${p.storage} onChange=${(e) => set(i, 'storage', +e.target.value)}>${list.storages.map((st, k) => html`<option value=${k}>${st.label}</option>`)}</select></label>
+        <label class="field">Copie vers<select value=${p.storage} onChange=${(e) => set(i, 'storage', +e.target.value)}>${list.storages.length ? list.storages.map((st, k) => html`<option value=${k}>${st.label}</option>`) : html`<option value="0">le serveur seulement</option>`}</select></label>
         <label class="field">Qualité<select value=${p.resolution} onChange=${(e) => set(i, 'resolution', e.target.value)}><option value="1080p50">Full HD 1080p50</option><option value="2160p50">4K 2160p50</option></select></label>
         <label class="field">GO<select value=${p.go} onChange=${(e) => set(i, 'go', +e.target.value)}><option value="0">aucune</option>${list.gos.map((g, k) => html`<option value=${k + 1}>${g.label}</option>`)}</select></label>
         <label class="field">Personnes<input type="number" min="1" max="5" value=${p.people} onInput=${(e) => set(i, 'people', Math.max(1, Math.min(5, +e.target.value || 1)))} /></label>
@@ -807,7 +833,7 @@ function Nodes() {
   const [arm, setArm] = useState(null);
   const [plan, setPlan] = useState(null);
   const drag = useRef(null);
-  if (!settings) return html`<${Web} path="/admin/studio"><p class="w-sub">Chargement…</p><//>`;
+  if (!settings) return html`<${AdminFrame} page="automations"><p class="w-sub">Chargement…</p><//>`;
   const scs = settings.scenarios;
   const sc = scs[cur] || { nodes: [], wires: [] };
   const update = (f) => { const next = scs.map((x, i) => (i === cur ? f({ ...x, nodes: x.nodes.slice(), wires: x.wires.slice() }) : x)); setSettings({ ...settings, scenarios: next }); };
@@ -828,8 +854,8 @@ function Nodes() {
   const pos = (id) => sc.nodes.find((n) => n.id === id);
   const tryPlan = async (ev) => { try { setPlan({ ev, acts: await api('/api/scenarios/plan/' + ev, null, 'POST') }); } catch (e) { /* shown */ } };
   const field = (k, label, type) => html`<label class="field">${label}<input type=${type || 'text'} value=${node[k]} onInput=${(e) => setField(k, type === 'number' ? +e.target.value : e.target.value)} /></label>`;
-  return html`<${Web} path="/admin/studio" studio=${settings.studio}>
-    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">Le studio en nœuds</h1><span class="w-sub">Un déclencheur, des conditions, des actions. Glissez les nœuds ; reliez une sortie (à droite) à une entrée (à gauche).</span></div>
+  return html`<${AdminFrame} page="automations">
+    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">Automations</h1><span class="w-sub">Ce que le studio fait seul à chaque moment du tournage : un déclencheur, des conditions, des actions. Glissez les nœuds ; reliez une sortie (à droite) à une entrée (à gauche).</span></div>
       <div class="row"><select class="winput" style="width:220px" value=${cur} onChange=${(e) => { setCur(+e.target.value); setSel(null); }}>${scs.map((x, i) => html`<option value=${i}>${x.name}</option>`)}</select>
         <label class="row w-sub" style="gap:6px"><input type="checkbox" checked=${sc.enabled !== false} onChange=${(e) => update((x) => ({ ...x, enabled: e.target.checked }))} />actif</label>
         <button type="button" class="wbtn" onClick=${() => { const id = 's' + Date.now().toString(36); setSettings({ ...settings, scenarios: [...scs, { id, name: 'Nouveau scénario', enabled: true, nodes: [], wires: [] }] }); setCur(scs.length); }}>Nouveau</button>
@@ -885,7 +911,7 @@ function Directing() {
   const [shootId, setShootId] = useState('');
   const [rep, setRep] = useState(null);
   const [busy, setBusy] = useState(false);
-  if (!settings) return html`<${Web} path="/admin/realisation"><p class="w-sub">Chargement…</p><//>`;
+  if (!settings) return html`<${AdminFrame} page="realisation"><p class="w-sub">Chargement…</p><//>`;
   const profiles = settings.profiles;
   const p = profiles[cur];
   const setP = (k, v) => setSettings({ ...settings, profiles: profiles.map((x, i) => (i === cur ? { ...x, [k]: v } : x)) });
@@ -898,7 +924,7 @@ function Directing() {
     setBusy(false);
   };
   const ST = [['cutsPerMinute', 'Coupes par minute', (v) => v.toFixed(1).replace('.', ',')], ['meanShotS', 'Plan moyen', (v) => v.toFixed(0) + ' s'], ['widePercent', 'Part des plans larges', (v) => v.toFixed(0) + ' %'], ['listeningShots', 'Plans d’écoute', (v) => v]];
-  return html`<${Web} path="/admin/realisation" studio=${settings.studio}>
+  return html`<${AdminFrame} page="realisation">
     <div class="row" style="justify-content:space-between"><h1 class="w-title">Réalisation par l’IA</h1>
       <div class="row"><div class="w-nav">${profiles.map((x, i) => html`<a href="#" class=${i === cur ? 'on' : null} onClick=${(e) => { e.preventDefault(); setCur(i); }}>${x.name}</a>`)}</div><button type="button" class="wbtn pri" onClick=${save}>Enregistrer</button></div></div>
     <div class="cols">
@@ -923,51 +949,327 @@ function Directing() {
   <//>`;
 }
 
-// ---------- the administration: system ----------
+// ---------- the administration ----------
+// A frame (the studio's devices on the left, with their state), an
+// overview, and one short page per device. Saving applies: Studio restarts
+// by itself when a device changed.
 
-function System() {
+const DEVICES = [
+  ['melangeur', 'Mélangeur', ['Mélangeur'], 'ATEM ou vMix'],
+  ['cameras', 'Caméras', ['Caméras'], 'Sony en VISCA'],
+  ['plans', 'Plans des caméras', [], 'presets : large, chaque place'],
+  ['son', 'Console et micros', ['Console', 'Micros'], 'M32 ou DM5, Dante'],
+  ['images', 'Images reçues', ['Images'], 'pour enregistrer et diffuser'],
+  ['nodal', 'Nodal', ['Nodal'], 'Videohub, NMOS ou NDI'],
+  ['lumiere', 'Lumière et Stream Deck', ['Lumière'], 'Bitfocus Buttons'],
+  ['diffusion', 'Diffusion', ['Diffusion'], 'GO, YouTube, TikTok'],
+  ['calls', 'Calls', [], 'Quicklink StudioEdge'],
+  ['partages', 'Partages', ['Stockage'], 'où copier les tournages'],
+];
+const MORE = [['realisation', 'Réalisation par l’IA'], ['automations', 'Automations'], ['serveur', 'Serveur']];
+
+// The worst state of a page's checks: fail, unset, warn, ok (or none).
+function stateOf(checks, labels) {
+  if (!checks) return 'wait';
+  const cs = checks.filter((c) => labels.includes(c.label));
+  if (!cs.length) return null;
+  if (cs.some((c) => c.state === 'fail' && !c.detail.startsWith('non réglé'))) return 'fail';
+  const unset = cs.filter((c) => c.detail.startsWith('non réglé')).length;
+  if (unset === cs.length) return 'unset';
+  if (unset) return 'part';
+  if (cs.some((c) => c.state !== 'ok')) return 'warn';
+  return 'ok';
+}
+const STATE_TEXT = { ok: 'répond', warn: 'à vérifier', fail: 'ne répond pas', unset: 'non réglé', part: 'à compléter', wait: '…' };
+
+function useChecks() {
+  const [checks, setChecks] = useState(null);
+  const run = useCallback(() => { setChecks(null); fetch('/api/devices/check', { method: 'POST' }).then((r) => r.json()).then(setChecks).catch(() => setChecks([])); }, []);
+  useEffect(run, []);
+  return [checks, run];
+}
+
+function AdminFrame({ page, children, checks }) {
+  const [own] = useChecks();
+  const cs = checks === undefined ? own : checks;
+  const link = (key, label, labels, sub) => {
+    const st = labels ? stateOf(cs, labels) : null;
+    return html`<a href=${'/admin/' + key} class=${'adm-item' + (page === key ? ' on' : '')}>
+      <span class=${'dot ' + (st || 'none')} title=${st ? STATE_TEXT[st] : ''}></span>
+      <span class="t"><b>${label}</b>${sub ? html`<small>${sub}</small>` : null}</span></a>`;
+  };
+  return html`<div class="dark">
+    <header class="w-head">
+      <a href="/admin" class="w-brand" style="color:inherit;text-decoration:none"><b>Strata</b> <span>Studio</span> · Administration</a>
+      <span style="flex:1"></span>
+      <a class="wbtn" href="/tournages">Tournages</a><a class="wbtn" href="/">Tablette</a>
+    </header>
+    <div class="adm">
+      <nav class="adm-side" aria-label="Administration">
+        <a href="/admin" class=${'adm-item' + (page === 'etat' ? ' on' : '')}><span class="dot none"></span><span class="t"><b>État du studio</b></span></a>
+        <small>LE STUDIO</small>${DEVICES.map(([k, l, labels, sub]) => link(k, l, labels.length ? labels : null, sub))}
+        <small>L’IA ET LE SERVEUR</small>${MORE.map(([k, l]) => link(k, l, null, null))}
+      </nav>
+      <main class="adm-main">${children}</main>
+    </div>
+  </div>`;
+}
+
+// The overview: every device, its state, what to do.
+function AdminHome() {
+  const [checks, rerun] = useChecks();
+  const bad = checks ? DEVICES.filter(([, , labels]) => labels.length && ['fail', 'unset', 'warn', 'part'].includes(stateOf(checks, labels))) : [];
+  return html`<${AdminFrame} page="etat" checks=${checks}>
+    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">État du studio</h1>
+      <p class="w-sub">${!checks ? 'Studio interroge chaque appareil…' : bad.length ? `${bad.length} élément${bad.length > 1 ? 's' : ''} à régler ou à vérifier. Choisissez-en un pour le régler.` : 'Tout est réglé et répond.'}</p></div>
+      <button type="button" class="wbtn" onClick=${rerun}>Vérifier à nouveau</button></div>
+    <div class="dev-grid">${DEVICES.map(([k, label, labels, sub]) => {
+      const st = labels.length ? stateOf(checks, labels) : null;
+      const details = (checks || []).filter((c) => labels.includes(c.label));
+      return html`<a class=${'dev ' + (st || 'none')} href=${'/admin/' + k}>
+        <span class="row" style="justify-content:space-between;flex-wrap:nowrap"><b>${label}</b>${st ? html`<span class=${'tag ' + ({ ok: 'ok', warn: 'warn', part: 'warn', fail: 'live', unset: '' }[st] || '')}>${STATE_TEXT[st]}</span>` : null}</span>
+        <span class="w-sub">${st === 'unset' || !details.length ? sub : details.map((c) => (details.length > 1 ? c.label + ' : ' : '') + (c.detail.startsWith('non réglé') ? 'non réglé' : c.detail)).join(' · ')}</span>
+        <span class="dev-go">${st === 'unset' ? 'Régler' : 'Ouvrir'} →</span></a>`;
+    })}</div>
+  <//>`;
+}
+
+// One device's page: its settings, edited and applied.
+function DevicePage({ page, title, intro, labels, children }) {
   const [s, , setS] = useFetch('/api/settings');
-  const [sys] = useFetch('/api/system');
-  const [restart, setRestart] = useState(false);
-  if (!s) return html`<${Web} path="/admin/systeme"><p class="w-sub">Chargement…</p><//>`;
+  const [orig, setOrig] = useState(null);
+  const [checks, rerun] = useChecks();
+  const [busy, setBusy] = useState('');
+  useEffect(() => { if (s && !orig) setOrig(JSON.stringify(s)); }, [s]);
+  if (!s) return html`<${AdminFrame} page=${page} checks=${checks}><p class="w-sub">Chargement…</p><//>`;
+  const dirty = orig && JSON.stringify(s) !== orig;
   const at = (path, v) => { const next = JSON.parse(JSON.stringify(s)); let o = next; const k = path.split('.'); for (let i = 0; i < k.length - 1; i++) o = o[k[i]]; o[k[k.length - 1]] = v; setS(next); };
   const get = (path) => path.split('.').reduce((o, k) => (o == null ? o : o[k]), s);
-  const F = (path, label, opts) => { const v = get(path); const o = opts || {};
-    if (o.choices) return html`<label class="field">${label}<select value=${v} onChange=${(e) => at(path, e.target.value)}>${o.choices.map(([k, t]) => html`<option value=${k}>${t}</option>`)}</select></label>`;
-    if (o.num) return html`<label class="field">${label}<input type="number" value=${v} onInput=${(e) => at(path, +e.target.value)} /></label>`;
-    if (o.secret) return html`<label class="field">${label}<input type="password" autocomplete="off" value=${v} onInput=${(e) => at(path, e.target.value)} /></label>`;
-    if (o.list) return html`<label class="field">${label}<input value=${(v || []).join(o.sep || ' ')} onInput=${(e) => at(path, e.target.value.split(o.sep || ' ').filter((x) => x !== '').map(o.map || ((x) => x)))} /></label>`;
-    return html`<label class="field">${label}<input value=${v == null ? '' : v} placeholder=${o.ph || ''} onInput=${(e) => at(path, e.target.value)} /></label>`; };
-  const save = async () => { try { const r = await api('/api/settings', s, 'PUT'); setRestart(!!r.restart); toast(r.restart ? 'Enregistré · redémarrez pour changer d’appareils' : 'Enregistré'); } catch (e) { /* shown */ } };
+  const apply = async () => {
+    setBusy('Enregistrement…');
+    try {
+      const r = await api('/api/settings', s, 'PUT');
+      if (r.restart) {
+        setBusy('Studio redémarre pour prendre en compte l’appareil…');
+        await api('/api/system/restart', null, 'POST');
+        await new Promise((ok) => setTimeout(ok, 1500));
+        for (let i = 0; i < 40; i++) { try { if ((await fetch('/api/health')).ok) break; } catch (e) { /* not yet */ } await new Promise((ok) => setTimeout(ok, 700)); }
+      }
+      setOrig(JSON.stringify(s)); toast('Enregistré'); rerun();
+    } catch (e) { /* toast shown */ }
+    setBusy('');
+  };
+  const relevant = (checks || []).filter((c) => (labels || []).includes(c.label));
+  return html`<${AdminFrame} page=${page} checks=${checks}>
+    <h1 class="w-title">${title}</h1>
+    <p class="w-sub lead-w">${intro}</p>
+    ${labels && labels.length ? html`<div class="status-line">${!checks ? html`<span class="w-sub">Studio l’interroge…</span>` : relevant.map((c) => html`<span><span class=${'tag ' + (c.detail.startsWith('non réglé') ? '' : c.state === 'ok' ? 'ok' : c.state === 'warn' ? 'warn' : 'live')}>${c.detail.startsWith('non réglé') ? 'non réglé' : c.state === 'ok' ? 'répond' : c.state === 'warn' ? 'à vérifier' : 'ne répond pas'}</span> ${c.label} · ${c.detail.startsWith('non réglé') ? 'remplissez ci-dessous, puis « Enregistrer et appliquer »' : c.detail}</span>`)}
+      <button type="button" class="wbtn" onClick=${rerun}>Vérifier</button></div>` : null}
+    ${children({ s, at, get, setS })}
+    <div class=${'savebar' + (dirty || busy ? ' show' : '')}>
+      <span>${busy || 'Modifications non enregistrées.'}</span>
+      ${busy ? null : html`<button type="button" class="wbtn" onClick=${() => setS(JSON.parse(orig))}>Annuler</button><button type="button" class="wbtn pri" onClick=${apply}>Enregistrer et appliquer</button>`}
+    </div>
+  <//>`;
+}
+
+// Fields.
+function Field({ label, help, children }) {
+  return html`<label class="field">${label}${children}${help ? html`<small class="help">${help}</small>` : null}</label>`;
+}
+const text = (at, get, path, label, o) => html`<${Field} label=${label} help=${(o || {}).help}><input value=${get(path) == null ? '' : get(path)} placeholder=${(o || {}).ph || ''} type=${(o || {}).secret ? 'password' : 'text'} autocomplete="off" onInput=${(e) => at(path, e.target.value)} /><//>`;
+const num = (at, get, path, label, o) => html`<${Field} label=${label} help=${(o || {}).help}><input type="number" value=${get(path)} onInput=${(e) => at(path, +e.target.value)} /><//>`;
+const choice = (at, get, path, label, opts, o) => html`<${Field} label=${label} help=${(o || {}).help}><select value=${get(path)} onChange=${(e) => at(path, e.target.value)}>${opts.map(([k, t]) => html`<option value=${k}>${t}</option>`)}</select><//>`;
+const list = (at, get, path, label, o) => html`<${Field} label=${label} help=${(o || {}).help}><input value=${(get(path) || []).join(' ')} onInput=${(e) => at(path, e.target.value.split(/[\s,]+/).filter(Boolean).map(Number).filter((n) => !Number.isNaN(n)))} /><//>`;
+const check = (at, get, path, label) => html`<label class="row w-sub" style="gap:8px"><input type="checkbox" checked=${!!get(path)} onChange=${(e) => at(path, e.target.checked)} />${label}</label>`;
+const section = (title, body, note) => html`<section class="box"><h2>${title}</h2>${note ? html`<span class="w-sub">${note}</span>` : null}${body}</section>`;
+
+function PageMixer() {
+  return html`<${DevicePage} page="melangeur" title="Mélangeur" labels=${['Mélangeur']}
+    intro="Studio coupe le programme du mélangeur, et y construit le 50/50 et la vignette. L’IA ne touche au mélangeur que pendant un tournage ; une coupe faite au pupitre la suspend.">
+    ${({ at, get }) => html`
+      ${section('Le mélangeur', html`<div class="fields">
+        ${choice(at, get, 'switcher.kind', 'Modèle', [['', '— choisir —'], ['atem', 'Blackmagic ATEM'], ['vmix', 'vMix']])}
+        ${text(at, get, 'switcher.address', 'Adresse IP', { ph: '192.168.10.2' })}</div>`)}
+      ${get('switcher.kind') === 'vmix' ? section('Les mises en page de vMix', html`<div class="fields">
+        ${num(at, get, 'switcher.vmixSplit', 'Entrée « 50/50 »', { help: 'une entrée de mise en page à deux couches' })}
+        ${num(at, get, 'switcher.vmixPip', 'Entrée « vignette »', { help: 'une entrée de mise en page à deux couches' })}</div>`) : null}
+      ${get('switcher.kind') === 'atem' ? section('Les mises en page de l’ATEM', html`<span class="w-sub">Le 50/50 et la vignette passent par la SuperSource (entrée 6000), que Studio règle lui-même.</span>`) : null}
+      ${section('Les sources extérieures', html`<div class="fields">
+        ${num(at, get, 'agencyInput', 'Agence de presse : entrée du mélangeur')}${num(at, get, 'duplexInput', 'Duplex Aviwest : entrée du mélangeur')}</div>`, 'Les entrées des caméras se règlent dans Caméras, celles des calls dans Calls.')}`}
+  <//>`;
+}
+
+function PageCameras() {
+  const power = (cam, on) => post(`/api/cameras/${cam}/power/${on ? 1 : 0}`).then((r) => r && toast(on ? 'Caméra allumée' : 'Caméra en veille'));
+  return html`<${DevicePage} page="cameras" title="Caméras" labels=${['Caméras']}
+    intro="Les caméras PTZ Sony (FR7, BRC-AM7), pilotées en VISCA over IP : Studio les allume, rappelle leurs presets et fait les mouvements lents. Chaque caméra arrive sur une entrée du mélangeur.">
+    ${({ s, at, get }) => html`
+      ${section('Pilotage', html`<div class="fields">${choice(at, get, 'cameras.control', 'Protocole', [['', '— choisir —'], ['visca', 'VISCA over IP (port 52381)']])}
+        ${num(at, get, 'cameras.travelMs', 'Temps pour atteindre un preset (ms)', { help: 'Studio attend ce temps avant de couper sur la caméra' })}</div>`)}
+      ${section('Les caméras', html`<table class="wt"><thead><tr><th>Caméra</th><th>Adresse IP</th><th>Entrée du mélangeur</th><th></th></tr></thead><tbody>
+        ${s.setup.cameras.map((c, i) => html`<tr>
+          <td><input class="winput" value=${c.label} onInput=${(e) => at(`setup.cameras.${i}.label`, e.target.value)} /></td>
+          <td><input class="winput" value=${c.address || ''} placeholder="192.168.10.1${i + 1}" onInput=${(e) => at(`setup.cameras.${i}.address`, e.target.value)} /></td>
+          <td><input class="winput" type="number" value=${c.switcherInput} onInput=${(e) => at(`setup.cameras.${i}.switcherInput`, +e.target.value)} /></td>
+          <td class="row" style="gap:6px;flex-wrap:nowrap"><button type="button" class="wbtn" onClick=${() => power(c.id, true)}>Allumer</button><button type="button" class="wbtn" onClick=${() => power(c.id, false)}>Veille</button></td></tr>`)}
+      </tbody></table>`, 'Les cadres de chaque caméra (large, chaque place) se règlent dans Plans des caméras.')}`}
+  <//>`;
+}
+
+const KIND_LABEL = (k) => (k.type === 'wide' ? 'Plan large' : k.type === 'single' ? `Place ${k.seats} seule` : `Places ${(k.seats || []).join(', ')}`);
+function PagePlans() {
+  const go = (cam, preset, what) => post(`/api/cameras/${cam}/${what}/${preset}`).then((r) => r && toast(what === 'store' ? `Cadre gardé dans le preset ${preset}` : `Preset ${preset} rappelé`));
+  return html`<${DevicePage} page="plans" title="Plans des caméras"
+    intro="Chaque plan que l’IA peut prendre est un preset d’une caméra : le plan large, chaque personne seule, un groupe. Pour régler un plan : cadrez la caméra (sa télécommande, Buttons), puis « Garder ce cadre ». « Voir » rappelle le preset.">
+    ${({ s, at, setS }) => {
+      const shots = s.setup.shots;
+      const setShot = (i, v) => at(`setup.shots.${i}`, v);
+      const add = (cam) => { const id = Math.max(0, ...shots.map((x) => x.id)) + 1; const presets = shots.filter((x) => x.camera === cam).map((x) => x.preset || 0); setS({ ...s, setup: { ...s.setup, shots: [...shots, { id, camera: cam, kind: { type: 'wide' }, preset: Math.max(0, ...presets) + 1 }] } }); };
+      const del = (i) => setS({ ...s, setup: { ...s.setup, shots: shots.filter((_, j) => j !== i) } });
+      const seats = s.setup.seats.map((x) => x.id);
+      return s.setup.cameras.map((c) => section(`${c.label}${c.address ? ' · ' + c.address : ' · pas d’adresse'}`, html`<table class="wt"><thead><tr><th>Plan</th><th>Preset</th><th></th></tr></thead><tbody>
+        ${shots.map((sh, i) => (sh.camera !== c.id ? null : html`<tr>
+          <td><select class="winput" value=${sh.kind.type === 'single' ? 'p' + sh.kind.seats : sh.kind.type} onChange=${(e) => { const v = e.target.value; setShot(i, { ...sh, kind: v === 'wide' ? { type: 'wide' } : v === 'group' ? { type: 'group', seats: seats.slice(0, 2) } : { type: 'single', seats: +v.slice(1) } }); }}>
+            <option value="wide">Plan large</option>${seats.map((n) => html`<option value=${'p' + n}>Place ${n} seule</option>`)}<option value="group">Groupe de places</option></select>
+            ${sh.kind.type === 'group' ? html`<input class="winput" style="margin-top:6px" value=${sh.kind.seats.join(' ')} placeholder="1 2 3" onInput=${(e) => setShot(i, { ...sh, kind: { type: 'group', seats: e.target.value.split(/[\s,]+/).map(Number).filter((n) => seats.includes(n)) } })} />` : null}</td>
+          <td style="width:110px"><input class="winput" type="number" min="1" max="100" value=${sh.preset || ''} onInput=${(e) => setShot(i, { ...sh, preset: +e.target.value || null })} /></td>
+          <td class="row" style="gap:6px;flex-wrap:nowrap;justify-content:flex-end"><button type="button" class="wbtn" disabled=${!sh.preset} onClick=${() => go(c.id, sh.preset, 'recall')}>Voir</button><button type="button" class="wbtn" disabled=${!sh.preset} onClick=${() => go(c.id, sh.preset, 'store')}>Garder ce cadre</button><button type="button" class="wbtn danger" aria-label="Retirer ce plan" onClick=${() => del(i)}>×</button></td></tr>`))}
+      </tbody></table><div class="row"><button type="button" class="wbtn" onClick=${() => add(c.id)}>Ajouter un plan</button><span class="w-sub">${shots.filter((x) => x.camera === c.id).map((x) => KIND_LABEL(x.kind)).join(' · ')}</span></div>`));
+    }}
+  <//>`;
+}
+
+function PageSound() {
+  return html`<${DevicePage} page="son" title="Console et micros" labels=${['Console', 'Micros']}
+    intro="Studio ouvre les micros des places occupées, écrit le nom de chaque invité sur sa tranche, et écoute les micros (Dante, en AES67) pour savoir qui parle. Sans les micros, l’IA ne sait pas qui parle et garde le plan large.">
+    ${({ s, at, get }) => html`
+      ${section('La console', html`<div class="fields">${choice(at, get, 'console.kind', 'Modèle', [['', '— choisir —'], ['m32', 'Midas M32'], ['dm5', 'Yamaha DM5']])}${text(at, get, 'console.address', 'Adresse IP', { ph: '192.168.10.4' })}</div>`)}
+      ${section('Les micros (Dante en AES67)', html`<div class="fields">
+        ${text(at, get, 'audio.sdp', 'Fichier SDP du flux', { ph: '/etc/strata-studio/console.sdp', help: 'exporté depuis Dante Controller (flux AES67 de la console)' })}
+        ${text(at, get, 'audio.interface', 'Adresse IP de la carte Dante du serveur', { ph: '192.168.20.10' })}
+        ${text(at, get, 'audio.whisper', 'Écoute de l’animateur (serveur whisper.cpp)', { ph: '127.0.0.1:8178', help: 'installé par l’installateur ; vide : pas d’écoute' })}</div>`)}
+      ${section('Les places', html`<table class="wt"><thead><tr><th>Place</th><th>Tranche de la console</th><th>Canal dans le flux Dante</th></tr></thead><tbody>
+        ${s.setup.seats.map((x, i) => html`<tr><td><input class="winput" value=${x.label} onInput=${(e) => at(`setup.seats.${i}.label`, e.target.value)} /></td>
+          <td><input class="winput" type="number" value=${x.mic.consoleChannel} onInput=${(e) => at(`setup.seats.${i}.mic.consoleChannel`, +e.target.value)} /></td>
+          <td><input class="winput" type="number" value=${x.mic.danteChannel} onInput=${(e) => at(`setup.seats.${i}.mic.danteChannel`, +e.target.value)} /></td></tr>`)}
+      </tbody></table>`, 'La première personne placée sur la tablette est l’animateur : c’est son micro que l’IA écoute.')}`}
+  <//>`;
+}
+
+// One channel's ffmpeg input, edited by kind.
+function InputRow({ ch, i, at }) {
+  const inp = ch.input || [];
+  const kind = !inp.length ? 'none' : inp[0] === '-f' && inp[1] === 'decklink' ? 'decklink' : inp.length === 2 && inp[0] === '-i' ? 'url' : 'raw';
+  const val = kind === 'decklink' ? inp[3] || '' : kind === 'url' ? inp[1] : inp.join(' ');
+  const set = (k, v) => at(`recording.channels.${i}.input`, k === 'none' ? [] : k === 'decklink' ? ['-f', 'decklink', '-i', v] : k === 'url' ? ['-i', v] : v.split(' ').filter(Boolean));
+  return html`<tr><td><b>${ch.name}</b></td>
+    <td style="width:190px"><select class="winput" value=${kind} onChange=${(e) => set(e.target.value, e.target.value === kind ? val : '')}><option value="none">— pas réglée —</option><option value="url">SRT, RTP ou UDP</option><option value="decklink">Carte DeckLink</option><option value="raw">Options ffmpeg</option></select></td>
+    <td>${kind === 'none' ? html`<span class="w-sub">non réglée</span>` : html`<input class="winput" value=${val} placeholder=${kind === 'url' ? 'srt://0.0.0.0:9000?mode=listener' : kind === 'decklink' ? 'DeckLink 8K Pro (1)' : '-f … -i …'} onInput=${(e) => set(kind, e.target.value)} />`}</td></tr>`;
+}
+
+function PageImages() {
+  return html`<${DevicePage} page="images" title="Images reçues" labels=${['Images']}
+    intro="Les images que le serveur enregistre et diffuse : le programme du mélangeur (PGM), le programme sans habillage (CLEAN) et chaque caméra. Chacune arrive par le réseau (SRT, RTP) ou par une carte DeckLink.">
+    ${({ s, at, get }) => html`
+      ${section('Les entrées', html`<table class="wt"><tbody>${s.recording.channels.map((ch, i) => html`<${InputRow} ch=${ch} i=${i} at=${at} />`)}</tbody></table>`,
+        'Une carte DeckLink demande un ffmpeg compilé avec DeckLink (celui d’Ubuntu ne l’a pas) ; une même entrée DeckLink ne sert pas à la fois l’enregistrement et l’aperçu.')}
+      ${section('L’encodage des fichiers', html`<div class="fields">
+        ${choice(at, get, 'recording.codec', 'Codec (4:2:2)', [['h264', 'H.264'], ['h265', 'H.265']])}
+        ${choice(at, get, 'recording.accel', 'Encodeur', [['cpu', 'Processeur'], ['nvenc', 'NVIDIA'], ['qsv', 'Intel Quick Sync']], { help: 'mesurer ce que la machine tient : banc-encodage' })}
+        ${choice(at, get, 'recording.container', 'Conteneur', [['mov', 'MOV'], ['mp4', 'MP4']])}</div>`)}`}
+  <//>`;
+}
+
+function PageNodal() {
+  const rows = (s, at, key) => html`<table class="wt"><thead><tr><th>Nom</th><th>API Connection du nœud</th><th>Identifiant</th><th></th></tr></thead><tbody>
+    ${s.router[key].map((e, i) => html`<tr><td><input class="winput" value=${e.name} onInput=${(x) => at(`router.${key}.${i}.name`, x.target.value)} /></td>
+      <td><input class="winput" value=${e.node} placeholder="http://192.168.30.21/x-nmos/connection/v1.1" onInput=${(x) => at(`router.${key}.${i}.node`, x.target.value)} /></td>
+      <td><input class="winput mono" value=${e.id} onInput=${(x) => at(`router.${key}.${i}.id`, x.target.value)} /></td>
+      <td><button type="button" class="wbtn danger" onClick=${() => at(`router.${key}`, s.router[key].filter((_, j) => j !== i))}>×</button></td></tr>`)}
+    </tbody></table><button type="button" class="wbtn" onClick=${() => at(`router.${key}`, [...s.router[key], { name: '', node: '', id: '' }])}>Ajouter</button>`;
+  return html`<${DevicePage} page="nodal" title="Nodal" labels=${['Nodal']}
+    intro="Le nodal envoie le programme vers la plateforme GO choisie. Videohub en SDI, NMOS IS-05 en ST 2110 (sans registre), ou le routage NDI fait par Studio lui-même.">
+    ${({ s, at, get }) => html`
+      ${section('Le nodal', html`<div class="fields">
+        ${choice(at, get, 'router.kind', 'Type', [['none', 'Pas de nodal'], ['videohub', 'Blackmagic Videohub (SDI)'], ['nmos', 'NMOS IS-05 (ST 2110)'], ['ndi', 'NDI (routage par Studio)']])}
+        ${get('router.kind') === 'videohub' ? text(at, get, 'router.address', 'Adresse IP du Videohub') : null}
+        ${get('router.kind') !== 'none' ? text(at, get, 'router.pgmSource', 'Source du programme', { help: 'son nom dans le nodal (entrée Videohub, émetteur NMOS, source NDI)' }) : null}
+        ${get('router.kind') === 'ndi' ? text(at, get, 'router.ndiPrefix', 'Nom des sources NDI de Studio', { help: 'le runtime NDI 6 doit être installé (installateur)' }) : null}</div>`)}
+      ${get('router.kind') === 'nmos' ? section('Émetteurs (sources)', rows(s, at, 'senders')) : null}
+      ${get('router.kind') === 'nmos' ? section('Récepteurs (destinations)', rows(s, at, 'receivers')) : null}`}
+  <//>`;
+}
+
+function PageLight() {
+  return html`<${DevicePage} page="lumiere" title="Lumière et Stream Deck" labels=${['Lumière']}
+    intro="Bitfocus Buttons fait ce que Studio ne pilote pas lui-même : la lumière (DMX), le voyant ON AIR, d’autres automations. Studio y écrit aussi les touches du Stream Deck +.">
+    ${({ at, get }) => html`
+      ${section('Bitfocus Buttons', html`<div class="fields">${text(at, get, 'buttons.address', 'Adresse et port de l’API HTTP', { ph: '192.168.10.5:8000' })}</div>
+        ${check(at, get, 'buttons.deck', 'Piloter le parcours depuis un Stream Deck + branché sur Buttons')}`)}
+      ${section('Régler le Stream Deck dans Buttons', html`<ol class="w-sub" style="margin:0;padding-left:18px;line-height:1.7">
+        <li>Chaque touche 1 à 8 affiche <span class="mono">$(custom:studio_k1)</span> … <span class="mono">$(custom:studio_k8)</span>.</li>
+        <li>Chaque touche envoie une requête HTTP <span class="mono">POST http://&lt;serveur&gt;:8095/api/deck/key/1</span> … <span class="mono">/8</span>.</li>
+        <li>Chaque molette envoie <span class="mono">POST …/api/deck/dial/1/1</span> vers la droite, <span class="mono">…/dial/1/-1</span> vers la gauche.</li>
+        <li>L’écran du Stream Deck peut afficher <span class="mono">$(custom:studio_deck_title)</span> et <span class="mono">$(custom:studio_deck_hint)</span>.</li></ol>
+        <a class="wbtn" href="/deck">Voir le Stream Deck à l’écran</a>`)}
+      ${section('La lumière', html`<span class="w-sub">Ce qui se passe au début, au lancement et à la fin du tournage (lumière, ON AIR) se règle dans Automations.</span><a class="wbtn" href="/admin/automations">Ouvrir les automations</a>`)}`}
+  <//>`;
+}
+
+function PageDiffusion() {
+  return html`<${DevicePage} page="diffusion" title="Diffusion" labels=${['Diffusion']}
+    intro="Les plateformes GO sont des Blackmagic Streaming Encoder : Studio lit s’ils sont libres (sinon la tablette les grise), y route le programme et lance la diffusion. YouTube et TikTok (en 9:16) sont encodés par le serveur.">
+    ${({ s, at, get }) => html`
+      ${section('Les plateformes GO', html`<table class="wt"><thead><tr><th>Nom</th><th>Adresse du Streaming Encoder</th><th>Sortie du nodal qui l’alimente</th><th></th></tr></thead><tbody>
+        ${s.gos.map((g, i) => html`<tr><td><input class="winput" value=${g.label} onInput=${(e) => at(`gos.${i}.label`, e.target.value)} /></td>
+          <td><input class="winput" value=${g.address} placeholder="192.168.10.21" onInput=${(e) => at(`gos.${i}.address`, e.target.value)} /></td>
+          <td><input class="winput" value=${g.destination} onInput=${(e) => at(`gos.${i}.destination`, e.target.value)} /></td>
+          <td><button type="button" class="wbtn danger" aria-label="Retirer" onClick=${() => at('gos', s.gos.filter((_, j) => j !== i))}>×</button></td></tr>`)}
+      </tbody></table><div class="row"><button type="button" class="wbtn" onClick=${() => at('gos', [...s.gos, { label: 'GO' + (s.gos.length + 1), address: '', destination: 'GO' + (s.gos.length + 1) }])}>Ajouter une GO</button></div>`)}
+      ${section('YouTube', html`<div class="fields">${text(at, get, 'live.youtube.url', 'Serveur RTMP')}${text(at, get, 'live.youtube.key', 'Clé de diffusion', { secret: 1 })}</div>`)}
+      ${section('TikTok (9:16)', html`<div class="fields">${text(at, get, 'live.tiktok.url', 'Serveur RTMP(S)', { ph: 'rtmps://…' })}${text(at, get, 'live.tiktok.key', 'Clé de diffusion', { secret: 1 })}</div>`)}
+      ${section('Encodage de YouTube et TikTok', html`<div class="fields">${choice(at, get, 'live.accel', 'Encodeur', [['cpu', 'Processeur'], ['nvenc', 'NVIDIA'], ['qsv', 'Intel Quick Sync']])}</div>`, 'Le programme vient de l’entrée PGM (Images reçues).')}`}
+  <//>`;
+}
+
+function PageCalls() {
+  return html`<${DevicePage} page="calls" title="Calls"
+    intro="Les invités à distance (Studiocall, Teams, Zoom) passent par Quicklink StudioEdge. Studio crée un invité par call, avec son lien à envoyer, suit sa connexion, et le place sur une sortie de StudioEdge, donc sur une entrée du mélangeur.">
+    ${({ at, get }) => html`
+      ${section('Quicklink', html`<div class="fields">${text(at, get, 'calls.api', 'Adresse de l’API', { ph: 'https://…', help: 'celle de votre compte Quicklink' })}${text(at, get, 'calls.username', 'Compte')}${text(at, get, 'calls.password', 'Mot de passe', { secret: 1 })}${text(at, get, 'calls.room', 'Salle de distribution de StudioEdge')}</div>`)}
+      ${section('Les calls sur le mélangeur', html`<div class="fields">
+        ${list(at, get, 'calls.positions', 'Positions dans la salle (call 1, 2, 3, 4)', { help: 'séparées par des espaces' })}
+        ${list(at, get, 'calls.inputs', 'Entrées du mélangeur (call 1, 2, 3, 4)', { help: 'séparées par des espaces' })}</div>`)}`}
+  <//>`;
+}
+
+function PageShares() {
+  return html`<${DevicePage} page="partages" title="Partages" labels=${['Stockage']}
+    intro="Après le tournage, Studio copie les fichiers (et les versions 9:16) vers le partage choisi sur la tablette, rangés par programme et par date. Un partage SMB se monte avec l’installateur (il garde le compte et le monte au démarrage).">
+    ${({ s, at }) => html`
+      ${section('Les partages', html`<table class="wt"><thead><tr><th>Nom sur la tablette</th><th>Dossier sur le serveur</th><th></th></tr></thead><tbody>
+        ${s.storages.map((st, i) => html`<tr><td><input class="winput" value=${st.label} onInput=${(e) => at(`storages.${i}.label`, e.target.value)} /></td>
+          <td><input class="winput" value=${st.path} placeholder="/mnt/redaction" onInput=${(e) => at(`storages.${i}.path`, e.target.value)} /></td>
+          <td><button type="button" class="wbtn danger" aria-label="Retirer" onClick=${() => at('storages', s.storages.filter((_, j) => j !== i))}>×</button></td></tr>`)}
+      </tbody></table><div class="row"><button type="button" class="wbtn" onClick=${() => at('storages', [...s.storages, { label: '', path: '/mnt/' }])}>Ajouter un partage</button></div>`,
+        s.storages.length ? null : 'Aucun partage : les fichiers restent sur le serveur.')}`}
+  <//>`;
+}
+
+function PageServer() {
+  const [sys] = useFetch('/api/system');
   const reboot = async () => { try { await api('/api/system/restart', null, 'POST'); toast('Studio redémarre…'); setTimeout(() => location.reload(), 4000); } catch (e) { /* shown */ } };
-  return html`<${Web} path="/admin/systeme" studio=${s.studio}>
-    <div class="row" style="justify-content:space-between"><div><h1 class="w-title">Système</h1><span class="w-sub">Une adresse laissée vide : l’appareil est simulé. Les appareils changent au redémarrage de Studio.</span></div>
-      <div class="row">${restart ? html`<button type="button" class="wbtn" onClick=${reboot}>Redémarrer Studio</button>` : null}<button type="button" class="wbtn pri" onClick=${save}>Enregistrer</button></div></div>
-    ${sys ? html`<div class="box"><h2>Le serveur</h2><div class="fields w-sub" style="font-size:13px">
-      <span>Version ${sys.version} · en marche depuis ${fmt(sys.uptimeS)}</span><span>Réglages : <span class="mono">${sys.settingsFile}</span></span><span>${sys.ffmpeg || 'ffmpeg introuvable'}</span><span>NDI : ${sys.ndi ? 'runtime installé' : 'non installé'}</span>
-      <span>Mélangeur : ${sys.devices.switcher} ${sys.devices.switcherConnected ? '· connecté' : '· non connecté'}</span><span>Console : ${sys.devices.console}</span><span>Buttons : ${sys.devices.automation}</span><span>Nodal : ${sys.devices.router}</span><span>Micros : ${sys.devices.microphones}</span>${sys.simulated ? html`<span class="tag warn">studio simulé</span>` : null}</div>
-      ${sys.deviceErrors && sys.deviceErrors.length ? html`<div class="stack" style="display:flex;flex-direction:column;gap:6px">${sys.deviceErrors.map(([l, e]) => html`<span><span class="tag live">${l}</span> <span class="w-sub">ne répondait pas au démarrage, simulé en attendant : ${e}</span></span>`)}</div>` : null}</div>` : null}
-    <div class="box"><h2>Studio</h2><div class="fields">${F('studio', 'Nom du studio')}</div></div>
-    <div class="box"><h2>Mélangeur et console</h2><div class="fields">
-      ${F('switcher.kind', 'Mélangeur', { choices: [['sim', 'simulé'], ['atem', 'ATEM'], ['vmix', 'vMix']] })}${F('switcher.address', 'Adresse', { ph: '192.168.10.2' })}${F('switcher.vmixSplit', 'vMix : entrée 50/50', { num: 1 })}${F('switcher.vmixPip', 'vMix : entrée vignette', { num: 1 })}
-      ${F('console.kind', 'Console', { choices: [['sim', 'simulée'], ['m32', 'Midas M32'], ['dm5', 'Yamaha DM5']] })}${F('console.address', 'Adresse', { ph: '192.168.10.4' })}</div></div>
-    <div class="box"><h2>Caméras</h2><div class="fields">${F('cameras.control', 'Pilotage', { choices: [['sim', 'simulé'], ['visca', 'VISCA over IP']] })}${F('cameras.travelMs', 'Temps d’un preset (ms)', { num: 1 })}
-      ${s.setup.cameras.map((c, i) => F(`setup.cameras.${i}.address`, `${c.label} · adresse`))}${s.setup.cameras.map((c, i) => F(`setup.cameras.${i}.switcherInput`, `${c.label} · entrée du mélangeur`, { num: 1 }))}</div></div>
-    <div class="box"><h2>Nodal</h2><div class="fields">${F('router.kind', 'Nodal', { choices: [['sim', 'simulé'], ['videohub', 'Videohub (SDI)'], ['nmos', 'NMOS IS-05 (2110)'], ['ndi', 'NDI (routage de Studio)']] })}${F('router.address', 'Adresse du Videohub')}${F('router.pgmSource', 'Source du programme')}${F('router.ndiPrefix', 'NDI : nom des sources de Studio')}</div>
-      <span class="w-sub">NMOS : les émetteurs et récepteurs se déclarent dans <span class="mono">reglages.json</span> (nom, adresse de l’API Connection, identifiant).</span></div>
-    <div class="box"><h2>Son et écoute</h2><div class="fields">${F('audio.sdp', 'Fichier SDP du flux AES67', { ph: '/etc/strata-studio/console.sdp' })}${F('audio.interface', 'Interface réseau Dante')}${F('audio.whisper', 'Serveur whisper.cpp', { ph: '127.0.0.1:8178' })}</div></div>
-    <div class="box"><h2>Bitfocus Buttons et Stream Deck</h2><div class="fields">${F('buttons.address', 'Adresse de Buttons', { ph: '192.168.10.5:8000' })}
-      <label class="row w-sub" style="gap:6px"><input type="checkbox" checked=${s.buttons.deck} onChange=${(e) => at('buttons.deck', e.target.checked)} />écrire les touches du Stream Deck dans Buttons</label></div></div>
-    <div class="box"><h2>Plateformes GO</h2><div class="fields">${s.gos.map((g, i) => html`${F(`gos.${i}.label`, 'Nom')}${F(`gos.${i}.address`, `${g.label} · adresse du Streaming Encoder`)}${F(`gos.${i}.destination`, `${g.label} · sortie du nodal`)}`)}</div></div>
-    <div class="box"><h2>YouTube et TikTok</h2><div class="fields">${F('live.youtube.url', 'YouTube · serveur RTMP')}${F('live.youtube.key', 'YouTube · clé', { secret: 1 })}${F('live.tiktok.url', 'TikTok · serveur')}${F('live.tiktok.key', 'TikTok · clé', { secret: 1 })}
-      ${F('live.accel', 'Encodage', { choices: [['cpu', 'processeur'], ['nvenc', 'NVIDIA'], ['qsv', 'Intel Quick Sync']] })}${F('live.input', 'Entrée ffmpeg du programme (vide : celle du PGM)', { list: 1 })}</div></div>
-    <div class="box"><h2>Calls (Quicklink StudioEdge)</h2><div class="fields">${F('calls.api', 'Adresse de l’API', { ph: 'https://…' })}${F('calls.username', 'Compte')}${F('calls.password', 'Mot de passe', { secret: 1 })}${F('calls.room', 'Salle de distribution')}
-      ${F('calls.positions', 'Positions (call 1, 2…)', { list: 1, map: Number })}${F('calls.inputs', 'Entrées du mélangeur (call 1, 2…)', { list: 1, map: Number })}${F('agencyInput', 'Agence : entrée', { num: 1 })}${F('duplexInput', 'Duplex : entrée', { num: 1 })}</div></div>
-    <div class="box"><h2>Stockages (partages montés)</h2><div class="fields">${s.storages.map((st, i) => html`${F(`storages.${i}.label`, 'Nom')}${F(`storages.${i}.path`, 'Dossier', { ph: '/mnt/redaction' })}`)}</div>
-      <div class="row"><button type="button" class="wbtn" onClick=${() => at('storages', [...s.storages, { label: 'Nouveau stockage', path: '/mnt/' }])}>Ajouter un stockage</button>${s.storages.length > 1 ? html`<button type="button" class="wbtn danger" onClick=${() => at('storages', s.storages.slice(0, -1))}>Retirer le dernier</button>` : null}</div></div>
-    <div class="box"><h2>Enregistrement</h2><div class="fields">${F('recording.codec', 'Codec', { choices: [['h264', 'H.264 4:2:2'], ['h265', 'H.265 4:2:2']] })}${F('recording.accel', 'Encodage', { choices: [['cpu', 'processeur'], ['nvenc', 'NVIDIA'], ['qsv', 'Intel Quick Sync']] })}${F('recording.container', 'Conteneur', { choices: [['mov', 'MOV'], ['mp4', 'MP4']] })}
-      <label class="row w-sub" style="gap:6px"><input type="checkbox" checked=${s.recording.light} onChange=${(e) => at('recording.light', e.target.checked)} />images légères (essai sans carte d’encodage)</label></div>
-      <div class="fields">${s.recording.channels.map((c, i) => F(`recording.channels.${i}.input`, `${c.name} · entrée ffmpeg`, { list: 1 }))}</div></div>
+  return html`<${DevicePage} page="serveur" title="Serveur" intro="Le nom du studio, et l’état du serveur.">
+    ${({ at, get }) => html`
+      ${section('Le studio', html`<div class="fields">${text(at, get, 'studio', 'Nom du studio', { help: 'affiché sur la tablette et l’écran' })}</div>`)}
+      ${sys ? section('Le serveur', html`<table class="wt"><tbody>
+        <tr><td>Version</td><td class="mono">${sys.version}</td></tr>
+        <tr><td>En marche depuis</td><td class="mono">${fmt(sys.uptimeS)}</td></tr>
+        <tr><td>Réglages</td><td class="mono">${sys.settingsFile}</td></tr>
+        <tr><td>ffmpeg</td><td class="mono">${sys.ffmpeg || 'introuvable'}</td></tr>
+        <tr><td>Runtime NDI</td><td>${sys.ndi ? 'installé' : 'non installé'}</td></tr>
+      </tbody></table><div class="row"><button type="button" class="wbtn" onClick=${reboot}>Redémarrer Studio</button></div>`) : null}`}
   <//>`;
 }
 
@@ -982,9 +1284,10 @@ function App() {
   if (p.startsWith('/tournages/')) return html`<${Shoot} id=${decodeURIComponent(p.slice(11))} />`;
   if (p === '/direct') return html`<${Live} />`;
   if (p === '/programmes') return html`<${Programmes} />`;
-  if (p === '/admin/studio') return html`<${Nodes} />`;
-  if (p === '/admin/realisation') return html`<${Directing} />`;
-  if (p === '/admin' || p === '/admin/systeme') return html`<${System} />`;
+  const ADMIN = { '/admin': AdminHome, '/admin/melangeur': PageMixer, '/admin/cameras': PageCameras, '/admin/plans': PagePlans, '/admin/son': PageSound, '/admin/images': PageImages,
+    '/admin/nodal': PageNodal, '/admin/lumiere': PageLight, '/admin/diffusion': PageDiffusion, '/admin/calls': PageCalls, '/admin/partages': PageShares, '/admin/serveur': PageServer,
+    '/admin/automations': Nodes, '/admin/studio': Nodes, '/admin/realisation': Directing, '/admin/systeme': AdminHome };
+  if (ADMIN[p]) return html`<${ADMIN[p]} />`;
   return html`<${Journey} />`;
 }
 

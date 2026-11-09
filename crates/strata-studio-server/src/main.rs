@@ -1,9 +1,9 @@
 //! strata-studio: the Strata Studio server.
 //!
-//! For now it runs a **simulated studio** (switcher unless `--atem` or
-//! `--vmix` is given, four PTZ, console,
-//! Bitfocus, a scripted conversation) directed live by the Director, and
-//! serves its state and the takeover commands:
+//! It drives the studio set in `reglages.json` (switcher, cameras, console,
+//! nodal, Buttons, encoders, calls), directs during the shoots, records,
+//! streams, and serves the pages and the API (see `api.rs`). A device whose
+//! address is not set is absent: Studio says so and never pretends.
 //!
 //! | Route | |
 //! | --- | --- |
@@ -13,11 +13,8 @@
 //! | `POST /api/control/auto` · `/shadow` · `/take?by=Paul` | AI on, AI in shadow, a person takes the hand |
 //! | `POST /api/control/force/{shot}?seconds=10` | impose a shot |
 //! | `POST /api/control/lock/{cam}` · `/unlock/{cam}` | the AI leaves a camera alone |
-//! | `POST /api/control/profile/{n}` | profile: 0 podcast, 1 débat, 2 interview, 3 radio |
-//! | `POST /api/demo/panel-cut/{input}` | simulate a person cutting on the switcher's panel |
-//! | `POST /api/record/estimate` · `/start` · `/stop` · `GET /api/record/status` | the recording: time left, start with the tablet's answers, stop (then 9:16 versions and copy in the background), state of each channel |
-//! | `POST /api/demo/say` | simulate the host's words (`{"text": "On retrouve Julie en duplex"}`), as the speech recogniser would give them |
-//! | `POST /api/demo/remote/{id}/voice/{on}` | simulate a remote source speaking (`on` = 1) or silent (0) |
+//! | `POST /api/control/profile/{n}` | the directing profile |
+//! | `POST /api/record/estimate` · `/start` · `/stop` · `GET /api/record/status` | the recording |
 
 mod api;
 mod config;
@@ -39,19 +36,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use strata_studio_core::script::Script;
 use strata_studio_core::{
     CamId, CamState, Composite, Control, Decision, Director, Forced, Heard, Hint, Listener, Mode,
     Perception, Profile, RemoteId, RemoteState, SeatId, ShotId, ShotKind, StudioSetup, Subject,
 };
+use strata_studio_devices::absent::Absent;
 use strata_studio_devices::atem::{AtemLayout, AtemSwitcher};
 use strata_studio_devices::buttons::Buttons;
 use strata_studio_devices::m32::M32;
-use strata_studio_devices::quicklink::{Calls, Quicklink, SimCalls};
-use strata_studio_devices::sim::{SimAutomation, SimConsole, SimPtz, SimRouter, SimSwitcher};
+use strata_studio_devices::quicklink::{Calls, Quicklink};
 use strata_studio_devices::visca::ViscaPtz;
 use strata_studio_devices::vmix::{VmixLayout, VmixSwitcher};
-use strata_studio_devices::webencoder::{BlackmagicEncoder, GoEncoder, SimEncoder};
+use strata_studio_devices::webencoder::{BlackmagicEncoder, GoEncoder};
 use strata_studio_devices::yamaha::Yamaha;
 use strata_studio_devices::{AudioConsole, Automation, Ptz, Router as Nodal, Shown, Switcher};
 use strata_studio_sense::aes67;
@@ -75,10 +71,10 @@ struct Args {
     /// Directing profile: 0 podcast, 1 débat, 2 interview, 3 radio.
     #[arg(long, default_value_t = 0)]
     profile: usize,
-    /// Drive a real ATEM at this address (else a simulated switcher).
+    /// Drive a real ATEM at this address (else the settings').
     #[arg(long)]
     atem: Option<String>,
-    /// Drive a real vMix at this address (else a simulated switcher).
+    /// Drive a real vMix at this address (else the settings').
     #[arg(long)]
     vmix: Option<String>,
     /// vMix: the layout input with two layers for the side by side.
@@ -102,16 +98,16 @@ struct Args {
     #[arg(long, env = "STRATA_STUDIO_REC_DIR", default_value = "enregistrements")]
     rec_dir: String,
     /// The recording settings (codec, acceleration, container, each
-    /// channel's ffmpeg input), as JSON; else the simulated studio's.
+    /// channel's ffmpeg input), as JSON.
     #[arg(long)]
     rec_settings: Option<String>,
     /// The ffmpeg to record with.
     #[arg(long, default_value = "ffmpeg")]
     ffmpeg: String,
-    /// The audio console: `m32:<address>` or `dm5:<address>` (else simulated).
+    /// The audio console: `m32:<address>` or `dm5:<address>` (else the settings').
     #[arg(long)]
     console: Option<String>,
-    /// Bitfocus Buttons' HTTP API: `<address>:<port>` (else simulated).
+    /// Bitfocus Buttons' HTTP API: `<address>:<port>` (else the settings').
     #[arg(long)]
     buttons: Option<String>,
 }
@@ -182,34 +178,37 @@ fn console(s: &config::Settings) -> anyhow::Result<Box<dyn AudioConsole>> {
             a,
             strata_studio_devices::yamaha::PORT,
         )?)?),
-        "sim" | "" => Box::new(SimConsole::default()),
+        "sim" | "" => Box::new(Absent::new("Console")),
         k => anyhow::bail!("console inconnue : {k} (m32 ou dm5)"),
     })
 }
 
 fn automation(s: &config::Settings) -> anyhow::Result<Box<dyn Automation>> {
     Ok(if s.buttons.address.is_empty() {
-        Box::new(SimAutomation::default())
+        Box::new(Absent::new("Bitfocus Buttons"))
     } else {
         Box::new(Buttons::new(with_port(&s.buttons.address, 8000)?))
     })
 }
 
+/// The cameras that are set (VISCA, with an address); the others are
+/// absent, and the AI does not move them.
 fn cameras(s: &config::Settings) -> anyhow::Result<BTreeMap<CamId, Box<dyn Ptz>>> {
     let travel = Duration::from_millis(s.cameras.travel_ms);
+    if s.cameras.control != "visca" {
+        return Ok(BTreeMap::new());
+    }
     s.setup
         .cameras
         .iter()
+        .filter(|c| c.address.as_deref().is_some_and(|a| !a.trim().is_empty()))
         .map(|c| -> anyhow::Result<(CamId, Box<dyn Ptz>)> {
-            let first = if c.id.0 == 1 { 1 } else { c.id.0 - 1 };
-            let ptz: Box<dyn Ptz> = match (s.cameras.control.as_str(), &c.address) {
-                ("visca", Some(a)) if !a.is_empty() => Box::new(ViscaPtz::connect(
-                    c.label.clone(),
-                    with_port(a, strata_studio_devices::visca::PORT)?,
-                    travel,
-                )?),
-                _ => Box::new(SimPtz::new(c.label.clone(), first, travel)),
-            };
+            let a = c.address.as_deref().unwrap_or_default();
+            let ptz: Box<dyn Ptz> = Box::new(ViscaPtz::connect(
+                c.label.clone(),
+                with_port(a, strata_studio_devices::visca::PORT)?,
+                travel,
+            )?);
             Ok((c.id, ptz))
         })
         .collect()
@@ -226,7 +225,7 @@ fn nodal(s: &config::Settings) -> anyhow::Result<Box<dyn Nodal>> {
             r.receivers.clone(),
         )),
         "ndi" => Box::new(strata_studio_devices::ndi::NdiRouter::load(&r.ndi_prefix)?),
-        "sim" | "" => Box::new(SimRouter::default()),
+        "sim" | "" | "none" => Box::new(Absent::new("Nodal")),
         k => anyhow::bail!("nodal inconnu : {k} (videohub, nmos ou ndi)"),
     })
 }
@@ -236,16 +235,16 @@ fn externals(s: &config::Settings) -> shoot::Ext {
         .gos
         .iter()
         .map(|g| -> Box<dyn GoEncoder> {
-            if g.address.is_empty() {
-                Box::new(SimEncoder::new(g.label.clone(), g.sim_busy))
+            if g.address.trim().is_empty() {
+                Box::new(Absent::new(&g.label))
             } else {
                 Box::new(BlackmagicEncoder::new(g.label.clone(), &g.address))
             }
         })
         .collect();
     let c = &s.calls;
-    let calls: Box<dyn Calls> = if c.api.is_empty() {
-        Box::new(SimCalls::default())
+    let calls: Box<dyn Calls> = if c.api.trim().is_empty() {
+        Box::new(Absent::new("Quicklink"))
     } else {
         Box::new(Quicklink::new(&c.api, &c.username, &c.password, &c.room))
     };
@@ -340,7 +339,7 @@ fn start_audio(
     Ok((Some(voices), heard, Some(layout)))
 }
 
-/// The switcher: a real one when its address is given, else the simulated one.
+/// The switcher set, or absent.
 fn switcher(s: &config::Settings) -> anyhow::Result<Box<dyn Switcher>> {
     let sw = &s.switcher;
     Ok(match sw.kind.as_str() {
@@ -355,7 +354,7 @@ fn switcher(s: &config::Settings) -> anyhow::Result<Box<dyn Switcher>> {
                 pip_input: sw.vmix_pip,
             },
         )?),
-        "sim" | "" => Box::new(SimSwitcher::new()),
+        "sim" | "" => Box::new(Absent::new("Mélangeur")),
         k => anyhow::bail!("mélangeur inconnu : {k} (atem ou vmix)"),
     })
 }
@@ -380,7 +379,6 @@ struct App {
     ptz: BTreeMap<CamId, Box<dyn Ptz>>,
     console: Box<dyn AudioConsole>,
     automation: Box<dyn Automation>,
-    script: Script,
     start: Instant,
     last: Perception,
     journal: VecDeque<Entry>,
@@ -400,8 +398,6 @@ struct App {
     settings_path: std::path::PathBuf,
     data: std::path::PathBuf,
     ffmpeg: String,
-    /// Every device simulated (a studio to try Studio).
-    simulated: bool,
     router: Box<dyn Nodal>,
     session: session::Session,
     history: history::History,
@@ -415,6 +411,8 @@ struct App {
     disks: shoot::Disks,
     /// Devices that did not answer at start: (check's label, error).
     device_errors: Vec<(String, String)>,
+    /// Devices not set yet (labels of their checks).
+    unset: Vec<String>,
 }
 
 type Shared = Arc<Mutex<App>>;
@@ -444,7 +442,6 @@ impl App {
             router,
         } = devices;
         App {
-            simulated: settings.simulated(),
             settings_path: data.join("reglages.json"),
             history: history::History::new(&data),
             data,
@@ -461,6 +458,7 @@ impl App {
             deck_last: deck::DeckView::default(),
             disks: shoot::Disks::default(),
             device_errors: Vec::new(),
+            unset: vec![],
             listener: Listener::new(&setup),
             heard: Vec::new(),
             remote_voice: BTreeMap::new(),
@@ -475,7 +473,6 @@ impl App {
             ptz,
             console,
             automation,
-            script: Script::demo(),
             start: Instant::now(),
             last: Perception::default(),
             journal: VecDeque::new(),
@@ -617,17 +614,16 @@ impl App {
                 .lock()
                 .unwrap()
                 .mics(setup.seats.iter().map(|s| (s.id, s.mic.dante_channel))),
-            None => {
-                // The simulated conversation: only the seats taken speak.
-                let mut m = self.script.mics(setup.seats.iter().map(|s| s.id), t);
-                for x in &mut m {
-                    if setup.seat(x.seat).is_none_or(|s| s.guest.is_none()) {
-                        x.voice = false;
-                        x.level_db = -60.0;
-                    }
-                }
-                m
-            }
+            // No microphones received: silence, the AI keeps the wide shot.
+            None => setup
+                .seats
+                .iter()
+                .map(|s| strata_studio_core::MicState {
+                    seat: s.id,
+                    voice: false,
+                    level_db: -90.0,
+                })
+                .collect(),
         };
         let remotes = setup
             .remotes
@@ -679,7 +675,13 @@ impl App {
             }
         }
         let p = self.perceive();
-        let decisions = self.director.tick(&p, &self.control);
+        // The AI directs only during a shoot: outside, the switcher, the
+        // cameras and the console are left alone.
+        let decisions = if self.session.shooting.is_some() {
+            self.director.tick(&p, &self.control)
+        } else {
+            vec![]
+        };
         self.last = p;
         for d in decisions {
             self.execute(d);
@@ -989,41 +991,6 @@ async fn profile(State(app): State<Shared>, Path(n): Path<usize>) -> StatusCode 
     StatusCode::NO_CONTENT
 }
 
-async fn panel_cut(State(app): State<Shared>, Path(input): Path<u16>) -> StatusCode {
-    if !app.lock().unwrap().switcher.demo_panel_cut(input) {
-        return StatusCode::CONFLICT;
-    }
-    StatusCode::NO_CONTENT
-}
-
-#[derive(Deserialize)]
-struct Say {
-    text: String,
-    #[serde(default)]
-    seat: Option<u8>,
-}
-
-async fn say(State(app): State<Shared>, Json(said): Json<Say>) -> StatusCode {
-    let mut app = app.lock().unwrap();
-    let seat = said
-        .seat
-        .map(SeatId)
-        .or_else(|| app.director.setup().host_seat())
-        .unwrap_or(SeatId(1));
-    let heard = Heard {
-        t_ms: app.now(),
-        seat,
-        text: said.text,
-        is_final: true,
-    };
-    let hints = app.listener.hear(&heard);
-    if hints.is_empty() {
-        app.log(format!("entendu, rien à faire : « {} »", heard.text), true);
-    }
-    app.heard.extend(hints);
-    StatusCode::NO_CONTENT
-}
-
 async fn record_estimate(
     State(app): State<Shared>,
     Json(req): Json<record::RecordRequest>,
@@ -1092,15 +1059,6 @@ async fn record_status(State(app): State<Shared>) -> Json<serde_json::Value> {
     }
 }
 
-async fn remote_voice(State(app): State<Shared>, Path((id, on)): Path<(u8, u8)>) -> StatusCode {
-    let mut app = app.lock().unwrap();
-    if app.director.setup().remote(RemoteId(id)).is_none() {
-        return StatusCode::NOT_FOUND;
-    }
-    app.remote_voice.insert(RemoteId(id), on != 0);
-    StatusCode::NO_CONTENT
-}
-
 fn router(ctx: api::Ctx) -> Router {
     Router::new()
         .route("/api/health", get(|| async { "ok" }))
@@ -1114,13 +1072,10 @@ fn router(ctx: api::Ctx) -> Router {
         .route("/api/control/lock/{cam}", post(lock))
         .route("/api/control/unlock/{cam}", post(unlock))
         .route("/api/control/profile/{n}", post(profile))
-        .route("/api/demo/panel-cut/{input}", post(panel_cut))
-        .route("/api/demo/say", post(say))
         .route("/api/record/estimate", post(record_estimate))
         .route("/api/record/start", post(record_start))
         .route("/api/record/stop", post(record_stop))
         .route("/api/record/status", get(record_status))
-        .route("/api/demo/remote/{id}/voice/{on}", post(remote_voice))
         .merge(api::routes())
         .merge(web::routes())
         .with_state(ctx)
@@ -1146,35 +1101,35 @@ async fn main() -> anyhow::Result<()> {
         .cloned()
         .or_else(|| Profile::all().into_iter().nth(args.profile))
         .context("profil inconnu")?;
-    // A device that does not answer does not stop Studio: it is
-    // simulated, and the studio check says so.
+    let dev = settings.clone();
+
+    // A device that does not answer does not stop Studio: it is absent
+    // until the next start, and the studio check says so.
     let mut device_errors: Vec<(String, String)> = Vec::new();
     let mut fallback = |label: &str, e: anyhow::Error| {
-        tracing::error!("{label} : {e:#} (simulé en attendant)");
+        tracing::error!("{label} : {e:#}");
         device_errors.push((label.to_string(), format!("{e:#}")));
     };
-    let sw = switcher(&settings).unwrap_or_else(|e| {
+    let sw = switcher(&dev).unwrap_or_else(|e| {
         fallback("Mélangeur", e);
-        Box::new(SimSwitcher::new())
+        Box::new(Absent::new("Mélangeur"))
     });
     tracing::info!("mélangeur : {}", sw.name());
-    let console = console(&settings).unwrap_or_else(|e| {
+    let console = console(&dev).unwrap_or_else(|e| {
         fallback("Console", e);
-        Box::new(SimConsole::default())
+        Box::new(Absent::new("Console"))
     });
-    let buttons = automation(&settings).unwrap_or_else(|e| {
+    let buttons = automation(&dev).unwrap_or_else(|e| {
         fallback("Lumière", e);
-        Box::new(SimAutomation::default())
+        Box::new(Absent::new("Bitfocus Buttons"))
     });
-    let router_dev = nodal(&settings).unwrap_or_else(|e| {
+    let router_dev = nodal(&dev).unwrap_or_else(|e| {
         fallback("Nodal", e);
-        Box::new(SimRouter::default())
+        Box::new(Absent::new("Nodal"))
     });
-    let ptz = cameras(&settings).unwrap_or_else(|e| {
+    let ptz = cameras(&dev).unwrap_or_else(|e| {
         fallback("Caméras", e);
-        let mut sim = settings.clone();
-        sim.cameras.control = "sim".into();
-        cameras(&sim).unwrap_or_default()
+        BTreeMap::new()
     });
     tracing::info!(
         "console : {} · automations : {} · nodal : {}",
@@ -1189,13 +1144,12 @@ async fn main() -> anyhow::Result<()> {
         ptz,
         router: router_dev,
     };
-    let ext: shoot::SharedExt = Arc::new(Mutex::new(externals(&settings)));
-    let deck_tx = if settings.buttons.deck && !settings.buttons.address.is_empty() {
-        automation(&settings).ok().map(shoot::deck_pusher)
+    let ext: shoot::SharedExt = Arc::new(Mutex::new(externals(&dev)));
+    let deck_tx = if dev.buttons.deck && !dev.buttons.address.is_empty() {
+        automation(&dev).ok().map(shoot::deck_pusher)
     } else {
         None
     };
-    let simulated = settings.simulated();
     let app: Shared = Arc::new(Mutex::new(App::new(profile, settings, data, devices)));
     {
         let mut a = app.lock().unwrap();
@@ -1206,11 +1160,12 @@ async fn main() -> anyhow::Result<()> {
         let host = setup.host_seat().unwrap_or(SeatId(1));
         let host_channel = setup.seat(host).map_or(0, |s| s.mic.dante_channel);
         let mic_sink: record::MicSink = Arc::new(Mutex::new(None));
+        let audio = a.settings.audio.clone();
         let (voices, heard, stream) =
-            match start_audio(&a.settings.audio, host, host_channel, mic_sink.clone()) {
+            match start_audio(&audio, host, host_channel, mic_sink.clone()) {
                 Ok(x) => x,
                 Err(e) => {
-                    tracing::error!("micros : {e:#} (conversation simulée en attendant)");
+                    tracing::error!("micros : {e:#}");
                     a.device_errors.push(("Micros".into(), format!("{e:#}")));
                     (None, Arc::new(Mutex::new(Vec::new())), None)
                 }
@@ -1226,35 +1181,13 @@ async fn main() -> anyhow::Result<()> {
             stream,
         ));
     }
-    if simulated {
+    {
         let mut a = app.lock().unwrap();
-        let names = [
-            (1u8, "Paul"),
-            (2, "Alice"),
-            (3, "Karim"),
-            (4, "Sophie"),
-            (5, "Léa"),
-        ];
-        for seat in &mut a.director.setup_mut().seats {
-            seat.guest = names
-                .iter()
-                .find(|(n, _)| SeatId(*n) == seat.id)
-                .map(|(_, g)| g.to_string());
+        a.unset = a.settings.unset().iter().map(|s| s.to_string()).collect();
+        if !a.unset.is_empty() {
+            let u = a.unset.join(", ");
+            a.log(format!("à régler dans l'administration : {u}"), true);
         }
-        if let Some(duplex) = a
-            .director
-            .setup_mut()
-            .remotes
-            .iter_mut()
-            .find(|r| r.id == RemoteId(2))
-        {
-            duplex.guest = Some("Julie Roux".into());
-        }
-        a.listener = Listener::new(a.director.setup());
-        a.log(
-            "studio simulé : 5 places, 4 PTZ, conversation de démonstration".into(),
-            true,
-        );
     }
 
     let ticker = app.clone();
@@ -1287,7 +1220,7 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("écoute sur {}", args.listen))?;
     tracing::info!("Strata Studio sur http://{}", args.listen);
     let at_end = app.clone();
-    let ctx = api::Ctx { app };
+    let ctx = api::Ctx { app, ext };
     axum::serve(listener, router(ctx))
         .with_graceful_shutdown(stop_signal())
         .await?;

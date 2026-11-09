@@ -1,5 +1,5 @@
-//! The devices Studio drives, behind one interface per kind of device, and
-//! a simulator for each: Studio is tested and shown without hardware.
+//! The devices Studio drives, behind one interface per kind of device. A
+//! device not set is [`absent`]; the simulators are for the tests only.
 //!
 //! | Interface | Devices (planned) |
 //! | --- | --- |
@@ -11,12 +11,14 @@
 //! | [`webencoder::GoEncoder`] | the GO platforms: Blackmagic Streaming Encoder 4K (REST, [`webencoder`]) |
 //! | [`quicklink::Calls`] | the calls: Quicklink StudioEdge (REST API v1.5, [`quicklink`]) |
 
+pub mod absent;
 pub mod atem;
 pub mod buttons;
 pub mod m32;
 pub mod ndi;
 pub mod nmos;
 pub mod quicklink;
+#[cfg(test)]
 pub mod sim;
 #[cfg(test)]
 mod testhttp;
@@ -85,6 +87,10 @@ pub trait Router: Send {
     fn route(&mut self, destination: &str, source: &str) -> Result<()>;
     /// (destination, source), as the router says.
     fn routes(&self) -> Vec<(String, String)>;
+    /// Whether the router answers.
+    fn connected(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -108,6 +114,14 @@ pub trait Ptz: Send {
     fn power(&mut self, _on: bool) -> Result<()> {
         Ok(())
     }
+    /// Asks the camera itself: does it answer, is it on (not in standby)?
+    fn check(&mut self) -> Result<bool> {
+        Ok(true)
+    }
+    /// Keeps the camera's current framing in a preset.
+    fn store(&mut self, _preset: u8) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// The audio console the microphones go through.
@@ -117,6 +131,10 @@ pub trait AudioConsole: Send {
     fn set_on(&mut self, channel: u8, on: bool) -> Result<()>;
     /// The name on the channel's strip (the guest's).
     fn set_name(&mut self, channel: u8, name: &str) -> Result<()>;
+    /// Asks the console itself whether it answers; its model if it says.
+    fn check(&mut self) -> Result<String> {
+        Ok(self.name())
+    }
 }
 
 /// Bitfocus Buttons: what Studio does not drive itself (the

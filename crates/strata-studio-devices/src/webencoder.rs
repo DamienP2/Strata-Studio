@@ -129,57 +129,6 @@ impl GoEncoder for BlackmagicEncoder {
     }
 }
 
-/// A simulated encoder: idle, or already taken by another studio.
-pub struct SimEncoder {
-    pub label: String,
-    pub taken_elsewhere: bool,
-    pub streaming_since: Option<std::time::Instant>,
-}
-
-impl SimEncoder {
-    pub fn new(label: impl Into<String>, taken_elsewhere: bool) -> Self {
-        SimEncoder {
-            label: label.into(),
-            taken_elsewhere,
-            streaming_since: None,
-        }
-    }
-}
-
-impl GoEncoder for SimEncoder {
-    fn name(&self) -> String {
-        format!("{} (simulé)", self.label)
-    }
-    fn state(&mut self) -> GoState {
-        if self.taken_elsewhere {
-            return GoState::Live {
-                status: "Streaming".into(),
-                bitrate: 12_000_000,
-                seconds: 1834,
-            };
-        }
-        match self.streaming_since {
-            Some(t) => GoState::Live {
-                status: "Streaming".into(),
-                bitrate: 12_000_000,
-                seconds: t.elapsed().as_secs(),
-            },
-            None => GoState::Idle,
-        }
-    }
-    fn start(&mut self) -> Result<()> {
-        if self.taken_elsewhere {
-            return Err(DeviceError::Refused(self.name(), "déjà en service".into()));
-        }
-        self.streaming_since = Some(std::time::Instant::now());
-        Ok(())
-    }
-    fn stop(&mut self) -> Result<()> {
-        self.streaming_since = None;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

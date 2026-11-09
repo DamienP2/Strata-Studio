@@ -361,7 +361,6 @@ impl PerceptionLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strata_studio_core::script::Script;
     use strata_studio_core::{CamState, SeatId};
 
     #[test]
@@ -401,13 +400,22 @@ mod tests {
     #[test]
     fn the_ai_replays_a_conversation_with_another_profile() {
         let setup = StudioSetup::example();
-        let script = Script::demo();
+        // Each seat in turn speaks for 6 s, a minute long.
         let perceptions: Vec<Perception> = (0..1500u64)
             .map(|i| {
                 let t = i * 40;
+                let speaking = (t / 6000 % 5) as u8 + 1;
                 Perception {
                     t_ms: t,
-                    mics: script.mics(setup.seats.iter().map(|s| s.id), t),
+                    mics: setup
+                        .seats
+                        .iter()
+                        .map(|s| strata_studio_core::MicState {
+                            seat: s.id,
+                            voice: s.id.0 == speaking,
+                            level_db: if s.id.0 == speaking { -18.0 } else { -60.0 },
+                        })
+                        .collect(),
                     cams: setup
                         .cameras
                         .iter()

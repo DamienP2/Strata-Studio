@@ -436,10 +436,32 @@ pub fn variables(v: &DeckView) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{GoSettings, Programme};
+
+    /// A studio with two programmes and four GO.
+    fn studio() -> Settings {
+        Settings {
+            programmes: ["La Matinale", "Tech Hebdo"]
+                .iter()
+                .map(|n| Programme {
+                    name: n.to_string(),
+                    ..Programme::default()
+                })
+                .collect(),
+            gos: (1..=4)
+                .map(|n| GoSettings {
+                    label: format!("GO{n}"),
+                    address: format!("10.0.0.{n}"),
+                    destination: format!("GO{n}"),
+                })
+                .collect(),
+            ..Settings::default()
+        }
+    }
 
     #[test]
     fn every_step_has_eight_keys_and_four_dials() {
-        let settings = Settings::default();
+        let settings = studio();
         for step in 1..=14 {
             let s = Session {
                 step,
@@ -453,7 +475,7 @@ mod tests {
 
     #[test]
     fn keys_choose_and_the_busy_go_is_unavailable() {
-        let settings = Settings::default();
+        let settings = studio();
         let s = Session {
             step: 8,
             ..Default::default()
@@ -477,7 +499,7 @@ mod tests {
 
     #[test]
     fn launching_needs_two_presses() {
-        let settings = Settings::default();
+        let settings = studio();
         let s = Session {
             step: 13,
             ..Default::default()
@@ -488,7 +510,7 @@ mod tests {
 
     #[test]
     fn variables_for_buttons() {
-        let v = view(&Session::default(), &Settings::default(), &[], false);
+        let v = view(&Session::default(), &studio(), &[], false);
         let vars = variables(&v);
         assert!(vars.contains(&(
             "studio_k1".to_string(),

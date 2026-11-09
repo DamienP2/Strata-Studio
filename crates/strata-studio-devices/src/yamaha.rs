@@ -75,9 +75,23 @@ impl Yamaha {
     pub fn recall_scene(&mut self, scene: u16) -> Result<()> {
         self.ask(&scene_line(scene))
     }
+
+    /// `devinfo productname` → `OK devinfo productname "DM5"`.
+    pub fn product(&mut self) -> Result<String> {
+        self.stream.write_all(b"devinfo productname\n")?;
+        let mut answer = String::new();
+        self.reader.read_line(&mut answer)?;
+        if !answer.starts_with("OK") {
+            return Err(DeviceError::Refused(self.name(), answer.trim().to_string()));
+        }
+        Ok(answer.split('"').nth(1).unwrap_or("Yamaha").to_string())
+    }
 }
 
 impl AudioConsole for Yamaha {
+    fn check(&mut self) -> Result<String> {
+        self.product()
+    }
     fn name(&self) -> String {
         format!("Yamaha {}", self.addr)
     }
@@ -131,5 +145,22 @@ mod tests {
         assert!(y.set_name(2, "Alice").is_err(), "an ERROR is a refusal");
         let got = fake.join().unwrap();
         assert_eq!(got[0], "set MIXER:Current/InCh/Fader/On 1 0 1\n");
+    }
+
+    #[test]
+    fn the_console_says_its_product() {
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = server.local_addr().unwrap();
+        let fake = std::thread::spawn(move || {
+            let (s, _) = server.accept().unwrap();
+            let mut r = BufReader::new(s.try_clone().unwrap());
+            let mut l = String::new();
+            r.read_line(&mut l).unwrap();
+            assert_eq!(l, "devinfo productname\n");
+            (&s).write_all(b"OK devinfo productname \"DM5\"\n").unwrap();
+        });
+        let mut y = Yamaha::connect(addr).unwrap();
+        assert_eq!(y.check().unwrap(), "DM5");
+        fake.join().unwrap();
     }
 }

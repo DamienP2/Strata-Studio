@@ -122,6 +122,9 @@ impl Router for Videohub {
             .write_all(route_block(out, inp).as_bytes())?;
         Ok(())
     }
+    fn connected(&self) -> bool {
+        !self.state().outputs.is_empty()
+    }
     fn routes(&self) -> Vec<(String, String)> {
         let st = self.state();
         st.routes
